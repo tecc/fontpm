@@ -1,0 +1,6 @@
+/target
+
+# IDEs
+# - IntelliJ
+*.idea
+*.iml
