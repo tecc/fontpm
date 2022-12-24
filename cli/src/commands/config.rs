@@ -43,6 +43,7 @@ pub fn runner(master_args: &ArgMatches) -> commands::Result {
                 // might've overcomplicated this severely but i like it
                 config_write!("fontpm.enabled_sources" => array config.enabled_sources);
                 config_write!("fontpm.cache_dir" => option:path config.cache_dir);
+                config_write!("fontpm.font_install_dir" => option:path config.font_install_dir);
 
             }
 
