@@ -3,13 +3,13 @@ use fontpm_api::{debug, error, Error as FError, info, Source};
 use fontpm_api::source::RefreshOutput;
 use crate::commands::{self, Error, CommandAndRunner};
 use crate::host_impl::FpmHostImpl;
-use crate::sources::create_enabled_sources;
+use crate::sources::create_sources;
 
 pub const NAME: &str = "refresh";
 
 fn runner(args: &ArgMatches) -> commands::Result {
     let host = FpmHostImpl::create(None)?;
-    let sources = create_enabled_sources(Some(&host))?;
+    let sources = create_sources(Some(&host), None)?;
 
     {
         let source_display_names: Vec<String> = sources.iter()
@@ -58,6 +58,7 @@ fn runner(args: &ArgMatches) -> commands::Result {
             ""
         }
     }
+
     if errored > 0 {
         Err(Error::Custom(format!("{} source{} failed to refresh", errored, plural(errored))))
     } else {

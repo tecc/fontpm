@@ -2,7 +2,7 @@ use fontpm_api::{FpmHost, Source};
 use fontpm_source_google_fonts::GoogleFontsSource;
 use crate::config::FpmConfig;
 
-///
+/// Create a single source instance.
 ///
 /// # Arguments
 ///
@@ -25,7 +25,7 @@ use crate::config::FpmConfig;
 /// let source = create_source(&id);
 /// assert!(source.is_none());
 /// ```
-pub fn create_source<'a>(source: String, host: Option<&'a dyn FpmHost>) -> Option<impl Source<'a>> {
+pub fn create_source<'host>(source: String, host: Option<&'host dyn FpmHost>) -> Option<impl Source<'host>> {
     macro_rules! source {
         ($source:expr) => {
             Some({
@@ -44,11 +44,20 @@ pub fn create_source<'a>(source: String, host: Option<&'a dyn FpmHost>) -> Optio
     }
 }
 
-pub fn create_enabled_sources<'a>(host: Option<&'a dyn FpmHost>) -> fontpm_api::Result<Vec<impl Source<'a>>> {
+pub fn create_sources<'host>(host: Option<&'host dyn FpmHost>, only: Option<Vec<&String>>) -> fontpm_api::Result<Vec<impl Source<'host>>> {
     let config = FpmConfig::load()?.clone();
 
+    let only = if let Some(v) = only { v.into_iter().collect() } else { Vec::new() };
+
     return Ok(config.enabled_sources.into_iter()
-        .filter_map(|v| create_source(v, host))
+        .filter_map(|v| {
+            if only.len() > 0 {
+                if !only.contains(&&v) {
+                    return None
+                }
+            }
+            create_source(v, host)
+        })
         .collect()
     );
 }
