@@ -1,6 +1,7 @@
 use clap::{ArgMatches, Command};
 use fontpm_api::{debug, error, Error as FError, info, Source};
 use fontpm_api::source::RefreshOutput;
+use fontpm_api::util::{nice_list, plural_s};
 use crate::commands::{self, Error, CommandAndRunner};
 use crate::host_impl::FpmHostImpl;
 use crate::sources::create_sources;
@@ -15,7 +16,7 @@ fn runner(args: &ArgMatches) -> commands::Result {
         let source_display_names: Vec<String> = sources.iter()
             .map(|v| v.name().to_string())
             .collect();
-        info!("Refreshing: {}", source_display_names.join(", "));
+        info!("Refreshing {}", nice_list(source_display_names, "and"));
     }
 
     let results = futures::executor::block_on(futures::future::join_all(
@@ -51,25 +52,17 @@ fn runner(args: &ArgMatches) -> commands::Result {
         }
     }
 
-    fn plural(v: i32) -> &'static str {
-        if v > 1 {
-            "s"
-        }  else {
-            ""
-        }
-    }
-
     if errored > 0 {
-        Err(Error::Custom(format!("{} source{} failed to refresh", errored, plural(errored))))
+        Err(Error::Custom(format!("{} source{} failed to refresh", errored, plural_s(errored))))
     } else {
         Ok(Some(format!(
             "{}{}", if downloaded > 0 {
-                format!("{} source{} refreshed", downloaded, plural(downloaded))
+                format!("{} source{} refreshed", downloaded, plural_s(downloaded))
             } else {
                 "".to_string()
             },
             if already_up_to_date > 0 {
-                format!("{} source{} already up-to-date", already_up_to_date, plural(already_up_to_date))
+                format!("{} source{} already up-to-date", already_up_to_date, plural_s(already_up_to_date))
             } else {
                 format!("")
             }

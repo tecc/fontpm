@@ -25,3 +25,43 @@ pub fn create_parent(path: &PathBuf) -> std::io::Result<()> {
 
     Ok(())
 }
+
+pub fn plural_s(n: usize) -> &'static str {
+    return if n == 1 { "" } else { "s" }
+}
+pub fn plural_s_opposite(n: usize) -> &'static str {
+    return if n == 1 { "s" } else { "" }
+}
+
+pub fn nice_list<'a, I, S>(iter: I, last_join: S) -> String where I: IntoIterator, I::Item: ToString, S: ToString {
+    let collected: Vec<String> = iter.into_iter()
+        .map(|v| v.to_string())
+        .collect();
+
+    match collected.len() {
+        0 => "".into(),
+        1 => collected.first().unwrap().clone(),
+        2 => {
+            let first = collected.first().unwrap();
+            let last = collected.last().unwrap();
+            format!("{} {} {}", first, last_join.to_string(), last)
+        },
+        length => {
+            let mut str = String::new();
+            for (i, item) in collected.iter().rev().enumerate() {
+                let prefix = if i == length - 1 {
+                    "".into()
+                } else {
+                    if i == 0 {
+                        format!(", {} ", last_join.to_string())
+                    } else {
+                        ", ".into()
+                    }
+                };
+                str.push_str(prefix.as_str());
+                str.push_str(item.as_str());
+            }
+            str
+        }
+    }
+}
