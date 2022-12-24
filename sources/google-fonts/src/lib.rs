@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use default_env::default_env;
-use fontpm_api::{debug, FpmHost, Source};
+use fontpm_api::{debug, FpmHost, Source, trace};
 use fontpm_api::async_trait::async_trait;
 use fontpm_api::host::EmptyFpmHost;
 use fontpm_api::source::{Error, RefreshOutput};
@@ -156,9 +156,9 @@ impl<'host> Source<'host> for GoogleFontsSource<'host> {
     async fn refresh(&self) -> Result<RefreshOutput, Error> {
         let cache_file = self.cache_file(DATA_FILE);
         let current = self.last_downloaded_commit();
-        debug!("Last downloaded commit: {}", current.clone().unwrap_or("<none>".into()));
+        trace!("[google-fonts] Last downloaded commit: {}", current.clone().unwrap_or("<none>".into()));
         let latest = self.latest_commit().await?;
-        debug!("Latest commit: {}", latest);
+        trace!("Latest commit: {}", latest);
 
         if current != None && cache_file.exists() && current.unwrap() == latest {
             return Ok(RefreshOutput::AlreadyUpToDate)
