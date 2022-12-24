@@ -30,6 +30,16 @@ const COMMIT_FILE: &str = "commit.sha";
 const DATA_FILE: &str = "data.json";
 
 impl<'host> GoogleFontsSource<'host> {
+    pub const ID: &'host str = "google-fonts";
+    pub const NAME: &'host str = "Google Fonts";
+
+    pub fn new() -> Self {
+        return GoogleFontsSource {
+            host: &EmptyFpmHost::EMPTY_HOST,
+            client: None
+        };
+    }
+
     fn client(&self) -> &Client {
         return self.client.as_ref().unwrap();
     }
@@ -121,14 +131,11 @@ impl<'host> GoogleFontsSource<'host> {
 
 #[async_trait]
 impl<'host> Source<'host> for GoogleFontsSource<'host> {
-    const ID: &'host str = "google-fonts";
-    const NAME: &'host str = "Google Fonts";
-
-    fn new() -> Self {
-        return GoogleFontsSource {
-            host: &EmptyFpmHost::EMPTY_HOST,
-            client: None
-        };
+    fn id(&self) -> &'host str {
+        return Self::ID;
+    }
+    fn name(&self) -> &'host str {
+        return Self::NAME;
     }
 
     fn set_host(&mut self, host: &'host dyn FpmHost) {

@@ -10,17 +10,8 @@ pub enum RefreshOutput {
 
 #[async_trait]
 pub trait Source<'host> {
-    const ID: &'host str;
-    const NAME: &'host str;
-
-    fn id(&self) -> &'host str {
-        return Self::ID;
-    }
-    fn name(&self) -> &'host str {
-        return Self::NAME;
-    }
-
-    fn new() -> Self;
+    fn id(&self) -> &'host str;
+    fn name(&self) -> &'host str;
 
     fn set_host(&mut self, host: &'host dyn FpmHost);
 
