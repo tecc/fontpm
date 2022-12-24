@@ -18,7 +18,7 @@ use crate::github::GithubBranchData;
 
 pub struct GoogleFontsSource<'host> {
     host: &'host dyn FpmHost,
-    client: Option<reqwest::Client>
+    client: Option<Client>
 }
 
 // GitHub API
@@ -46,6 +46,11 @@ impl<'host> GoogleFontsSource<'host> {
 
     fn cache_dir(&self) -> PathBuf {
         return self.host.cache_dir_for(Self::ID.into());
+    }
+    fn cache_file<P>(&self, s: P) -> PathBuf where P: AsRef<Path> {
+        let mut path = self.cache_dir();
+        path.push(s);
+        path
     }
 
     fn last_downloaded_commit(&self) -> Option<String> {
@@ -149,12 +154,13 @@ impl<'host> Source<'host> for GoogleFontsSource<'host> {
     }
 
     async fn refresh(&self) -> Result<RefreshOutput, Error> {
+        let cache_file = self.cache_file(DATA_FILE);
         let current = self.last_downloaded_commit();
         debug!("Last downloaded commit: {}", current.clone().unwrap_or("<none>".into()));
         let latest = self.latest_commit().await?;
         debug!("Latest commit: {}", latest);
 
-        if current != None && current.unwrap() == latest {
+        if current != None && cache_file.exists() && current.unwrap() == latest {
             return Ok(RefreshOutput::AlreadyUpToDate)
         }
 
