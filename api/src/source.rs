@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
 use crate::host::FpmHost;
 use async_trait::async_trait;
-pub use crate::error::Error;
+use crate::error::Error;
+use crate::font::{DefinedFontInstallSpec, DefinedFontVariantSpec, FontInstallSpec};
 
 #[derive(PartialEq, Eq)]
 pub enum RefreshOutput {
@@ -16,4 +19,21 @@ pub trait Source<'host> {
     fn set_host(&mut self, host: &'host dyn FpmHost);
 
     async fn refresh(&self) -> Result<RefreshOutput, Error>;
+    async fn resolve_font(&self, spec: &FontInstallSpec) -> Result<DefinedFontInstallSpec, Error>;
+    async fn download_font(&self, spec: &DefinedFontInstallSpec, dir: &PathBuf) -> Result<HashMap<DefinedFontVariantSpec, PathBuf>, Error>;
+    fn description(&self) -> SourceDescription {
+        SourceDescription {
+            id: self.id().to_string(),
+            name: self.id().to_string()
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceDescription {
+    pub id: String,
+    pub name: String
+}
+pub trait SourceExt {
+    fn description(&self) -> SourceDescription;
 }

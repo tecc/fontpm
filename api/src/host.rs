@@ -4,7 +4,7 @@ pub use toml;
 
 pub trait FpmHost: Sync {
     fn global_cache_dir(&self) -> PathBuf;
-    fn cache_dir_for(&self, id: String) -> PathBuf;
+    fn cache_dir_for(&self, id: &str) -> PathBuf;
     fn font_install_dir(&self) -> PathBuf;
     fn config(&self, id: String) -> Option<&toml::Value>;
     fn version(&self) -> Version;
@@ -25,7 +25,7 @@ impl FpmHost for EmptyFpmHost {
         unimplemented!()
     }
 
-    fn cache_dir_for(&self, _: String) -> PathBuf {
+    fn cache_dir_for(&self, _: &str) -> PathBuf {
         unimplemented!()
     }
 

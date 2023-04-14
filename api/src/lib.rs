@@ -3,6 +3,7 @@ pub mod host;
 pub mod util;
 pub mod output;
 pub mod error;
+pub mod font;
 
 pub use error::{Error, Result};
 pub use async_trait;

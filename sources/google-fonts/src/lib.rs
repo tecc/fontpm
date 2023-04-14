@@ -1,19 +1,24 @@
 mod github;
 mod data;
 
-use std::fs::File;
-use std::io;
+use std::collections::HashMap;
+use std::fs::{create_dir_all, File};
 use std::path::{Path, PathBuf};
 use default_env::default_env;
 use fontpm_api::{debug, FpmHost, Source, trace};
 use fontpm_api::async_trait::async_trait;
 use fontpm_api::host::EmptyFpmHost;
-use fontpm_api::source::{Error, RefreshOutput};
-use std::io::{ErrorKind as IOErrorKind, Read, Write};
+use fontpm_api::source::{RefreshOutput};
+use fontpm_api::Error;
+use std::io::{Error as IOError, ErrorKind as IOErrorKind, Read, Write};
 use reqwest::{Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use sha2::{Sha256, Digest};
+use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontVariantSpec, FontInstallSpec};
 use fontpm_api::util::create_parent;
 use crate::data::Data;
+use crate::data::description::variant_to_string;
 use crate::github::GithubBranchData;
 
 pub struct GoogleFontsSource<'host> {
@@ -95,7 +100,7 @@ impl<'host> GoogleFontsSource<'host> {
                 .map_err(|v| Error::Deserialisation(v.to_string()))?
         };
         #[cfg(not(debug_assertions))]
-        let data = response.json().await?;
+        let data: GithubBranchData = response.json().await?;
 
         Ok(data.commit.sha)
     }
@@ -106,11 +111,8 @@ impl<'host> GoogleFontsSource<'host> {
         Ok(data)
     }
 
-    fn cache_write_str<S, V>(&self, file: S, value: V) -> Result<(), Error> where S: Into<String>, V: Into<String> {
-        let mut path = self.cache_dir();
-        path.push(file.into());
-        let path = path;
-
+    fn cache_write_str<S, V>(&self, file: S, value: V) -> Result<(), Error> where S: AsRef<Path>, V: Into<String> {
+        let path = self.cache_file(file);
         create_parent(&path)?;
 
         let str: String = value.into();
@@ -119,11 +121,8 @@ impl<'host> GoogleFontsSource<'host> {
 
         Ok(())
     }
-    fn cache_write_serialise<S, T>(&self, file: S, value: &T) -> Result<(), Error> where S: Into<String>, T: Serialize {
-        let mut path = self.cache_dir();
-        path.push(file.into());
-        let path = path;
-
+    fn cache_write_serialise<P, T>(&self, file: P, value: &T) -> Result<(), Error> where P: AsRef<Path>, T: Serialize {
+        let path = self.cache_file(file);
         create_parent(&path)?;
 
         let file = File::create(path)?;
@@ -131,6 +130,27 @@ impl<'host> GoogleFontsSource<'host> {
             .map_err(|v| Error::Generic(format!("Error whilst serialising: {}", v)))?;
 
         Ok(())
+    }
+    fn cache_read_deserialise<'de, T, P>(&self, file: P) -> Result<T, Error> where P: AsRef<Path>, T: DeserializeOwned {
+        let path = self.cache_file(file);
+        if !path.exists() {
+            return Err(Error::IO(IOErrorKind::NotFound.into()))
+        }
+
+        let file = File::open(path)?;
+        let result = serde_json::de::from_reader::<_, T>(file)
+            .map_err(|v| Error::Deserialisation(format!("{}", v)));
+
+        result
+    }
+
+    fn read_data(&self) -> Result<Data, Error> {
+        let data_file = self.cache_file(DATA_FILE);
+        if !data_file.exists() {
+            return Err(Error::IO(IOError::new(IOErrorKind::NotFound, "Data file does not exist")))
+        }
+
+        self.cache_read_deserialise(data_file)
     }
 }
 
@@ -156,9 +176,9 @@ impl<'host> Source<'host> for GoogleFontsSource<'host> {
     async fn refresh(&self) -> Result<RefreshOutput, Error> {
         let cache_file = self.cache_file(DATA_FILE);
         let current = self.last_downloaded_commit();
-        trace!("[google-fonts] Last downloaded commit: {}", current.clone().unwrap_or("<none>".into()));
+        trace!("[{}] Last downloaded commit: {}", Self::ID, current.clone().unwrap_or("<none>".into()));
         let latest = self.latest_commit().await?;
-        trace!("Latest commit: {}", latest);
+        trace!("[{}] Latest commit: {}", Self::ID, latest);
 
         if current != None && cache_file.exists() && current.unwrap() == latest {
             return Ok(RefreshOutput::AlreadyUpToDate)
@@ -169,5 +189,54 @@ impl<'host> Source<'host> for GoogleFontsSource<'host> {
         self.cache_write_str(COMMIT_FILE, latest)?;
 
         Ok(RefreshOutput::Downloaded)
+    }
+
+    async fn resolve_font(&self, spec: &FontInstallSpec) -> Result<DefinedFontInstallSpec, Error> {
+        let data = self.read_data()?;
+
+        let family = data.get_family(&spec.id).ok_or(Error::NoSuchFamily(spec.id.clone()))?;
+
+        family.try_into()
+    }
+
+    async fn download_font(&self, font_id: &DefinedFontInstallSpec, dir: &PathBuf) -> Result<HashMap<DefinedFontVariantSpec, PathBuf>, Error> {
+        let data = self.read_data()?;
+
+        let font = if let Some(desc) = data.get_family(&font_id.id) {
+            desc
+        } else {
+            return Err(Error::Generic(format!("Font {} does not exist", font_id.id)))
+        };
+
+        let dir = dir.join(&font_id.id);
+        let mut paths = HashMap::new();
+
+        for variant in &font_id.styles {
+            let variant_name = variant_to_string(variant);
+            let remote_file = match font.files.get(variant_name.as_str()) {
+                Some(file) => file.clone(),
+                None => return Err(Error::Generic(format!("Could not get file for font variant {variant_name}")))
+            };
+
+            let extension = PathBuf::from(&remote_file).extension().map_or(String::new(), |v| ".".to_string() + v.to_str().unwrap());
+            let url_hash = Sha256::new()
+                .chain_update(&remote_file)
+                .finalize();
+            let url_hash = format!("{:x}", url_hash);
+            let path = dir.join(variant_name).join(format!("{}{}", url_hash, extension));
+
+            paths.insert(variant.clone(), path.clone());
+            if path.exists() {
+                continue;
+            }
+            path.parent().map(create_dir_all);
+
+            let remote_data = reqwest::get("https://".to_string() + remote_file.as_str()).await?.error_for_status()?;
+            let mut file = File::create(&path)?;
+            let remote_data = remote_data.bytes().await?;
+            file.write_all(remote_data.as_ref())?;
+        }
+
+        Ok(paths)
     }
 }

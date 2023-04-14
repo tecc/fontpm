@@ -7,6 +7,8 @@ mod build_config;
 
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate async_trait;
 
 use clap::{arg, ArgAction, Command};
 use clap::parser::ValueSource;
@@ -34,7 +36,7 @@ async fn main() {
         .subcommands(subcommands.values().map(|a| a.description.clone()))
         .subcommand_required(true)
         .args(vec![
-            arg!(-s --silent "Silent output - will only print errors.")
+            arg!(-s --silent "Silent output - will only print errors")
                 .global(true)
                 .action(ArgAction::Count),
             arg!(-v --verbose "Verbose output - will print all messages. May be repeated.")
@@ -70,7 +72,7 @@ async fn main() {
     };
 
     if let Some(subcommand) = subcommands.get(subcommand_name) {
-        let result = (subcommand.runner)(subcommand_matches);
+        let result = (subcommand.runner).run(subcommand_matches).await;
 
         match result {
             Ok(v) => {

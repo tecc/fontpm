@@ -27,7 +27,7 @@ impl FpmHost for FpmHostImpl {
         self.cache_dir.clone()
     }
 
-    fn cache_dir_for(&self, id: String) -> PathBuf {
+    fn cache_dir_for(&self, id: &str) -> PathBuf {
         let mut clone = self.cache_dir.clone();
         clone.push(id);
         clone

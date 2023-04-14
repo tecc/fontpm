@@ -4,11 +4,12 @@ use fontpm_api::source::RefreshOutput;
 use fontpm_api::util::{nice_list, plural_s};
 use crate::commands::{self, Error, CommandAndRunner};
 use crate::host_impl::FpmHostImpl;
+use crate::runner;
 use crate::sources::create_sources;
 
 pub const NAME: &str = "refresh";
 
-fn runner(args: &ArgMatches) -> commands::Result {
+runner! { args =>
     let host = FpmHostImpl::create(None)?;
     let sources = create_sources(Some(&host), None)?;
 
@@ -73,7 +74,7 @@ fn runner(args: &ArgMatches) -> commands::Result {
 pub fn command() -> CommandAndRunner {
     return CommandAndRunner {
         description: Command::new(NAME)
-            .about("Refresh the local index of all available fonts."),
-        runner
+            .about("Refresh the local index of all available fonts"),
+        runner: Box::new(runner)
     };
 }

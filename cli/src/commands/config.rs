@@ -1,12 +1,13 @@
 use clap::{arg, ArgAction, ArgMatches, Command};
 use fontpm_api::{info, Error as FError};
 use crate::commands::{self, CommandAndRunner, Error};
+use crate::runner;
 
 pub const NAME: &str = "config";
 
 const CMD_PRINT: &str = "print";
 
-pub fn runner(master_args: &ArgMatches) -> commands::Result {
+runner! { master_args =>
     // TODO: Setting configuration values
     match master_args.subcommand().unwrap() {
         (CMD_PRINT, args) => {
@@ -61,13 +62,13 @@ pub fn command() -> CommandAndRunner {
             .about("Gets and sets configuration values")
             .subcommands(vec![
                 Command::new(CMD_PRINT)
-                    .about("Prints the in-memory configuration.")
+                    .about("Prints the in-memory configuration")
                     .args(vec![
-                        arg!(--raw "Print the configuration as TOML.")
+                        arg!(--raw "Print the configuration as TOML")
                             .action(ArgAction::SetTrue)
                     ])
             ])
             .subcommand_required(true),
-        runner,
+        runner: Box::new(runner)
     }
 }

@@ -1,4 +1,4 @@
-use fontpm_api::{FpmHost, Source};
+use fontpm_api::{Error, FpmHost, Source};
 use fontpm_source_google_fonts::GoogleFontsSource;
 use crate::config::FpmConfig;
 
@@ -60,4 +60,37 @@ pub fn create_sources<'host>(host: Option<&'host dyn FpmHost>, only: Option<Vec<
         })
         .collect()
     );
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct FontSpec {
+    pub source: Option<String>,
+    pub font_id: String
+}
+
+impl FontSpec {
+    pub fn parse<S>(v: S) -> Result<FontSpec, Error> where S: ToString {
+        let v = v.to_string();
+        if v.is_empty() {
+            return Err(Error::Generic("Fontspec must not be an empty string".into()))
+        }
+
+        let mut source = None;
+        let mut current = String::new();
+        for c in v.chars() {
+            if c == ':' {
+                if source.is_some() {
+                    return Err(Error::Generic("Character ':' is illegal in font ID".into()))
+                }
+                source = Some(current.clone());
+                current.clear();
+            }
+            current.push(c)
+        }
+
+        Ok(FontSpec {
+            source,
+            font_id: current
+        })
+    }
 }
