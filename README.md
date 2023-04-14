@@ -55,7 +55,7 @@ fontpm refresh
 
 > **WARNING**
 > 
-> This may not work on all platforms. It should work with any XDG-compatible Linux system, but beyond that it's untested.
+> This may not work on all platforms. It should work with any XDG Base Directory-compliant Linux system, but beyond that it's untested.
 
 To install a font to your machine, simply run the following command:
 
