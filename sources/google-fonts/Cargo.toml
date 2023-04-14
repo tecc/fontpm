@@ -1,8 +1,14 @@
 [package]
 name = "fontpm-source-google-fonts"
+description = """
+Google Fonts font source [`fontpm`](https://github.com/tecc/fontpm).
+"""
+repository = "https://github.com/tecc/fontpm"
+keywords = ["fontpm", "fonts"]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
+readme = false
 
 [dependencies]
 default-env = "0.1.1"
