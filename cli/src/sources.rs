@@ -25,12 +25,12 @@ use crate::config::FpmConfig;
 /// let source = create_source(&id);
 /// assert!(source.is_none());
 /// ```
-pub fn create_source<'host>(source: String, host: Option<&'host dyn FpmHost>) -> Option<impl Source<'host>> {
+pub fn create_source<'host>(source: String, _host: Option<&'host dyn FpmHost>) -> Option<impl Source<'host>> {
     macro_rules! source {
         ($source:expr) => {
             Some({
                 let mut source = $source;
-                if let Some(host) = host {
+                if let Some(host) = _host {
                     source.set_host(host);
                 }
                 source

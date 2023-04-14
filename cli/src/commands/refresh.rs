@@ -2,7 +2,7 @@ use clap::{arg, ArgAction, ArgMatches, Command};
 use fontpm_api::{debug, error, info, Source, warning};
 use fontpm_api::source::RefreshOutput;
 use fontpm_api::util::{nice_list, plural_s};
-use crate::commands::{self, Error, CommandAndRunner};
+use crate::commands::{Error, CommandAndRunner};
 use crate::host_impl::FpmHostImpl;
 use crate::runner;
 use crate::sources::create_sources;

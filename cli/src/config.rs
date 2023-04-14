@@ -1,7 +1,6 @@
 use std::{collections::HashMap, io, path::PathBuf};
-use std::borrow::Borrow;
-use std::fs::{create_dir_all, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{File};
+use std::io::{Read};
 use serde::{Deserialize, Serialize};
 use toml::Value;
 use fontpm_api::{Result as FResult, Error};
@@ -12,7 +11,7 @@ use crate::build_config;
 pub struct EntireConfig {
     fontpm: FpmConfig,
     #[serde(skip_serializing_if = "HashMap::is_empty", default = "HashMap::new")]
-    sources: HashMap<String, toml::Value>
+    sources: HashMap<String, Value>
 }
 
 impl EntireConfig {

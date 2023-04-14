@@ -1,6 +1,5 @@
 use std::io::Write;
-use std::ops::{Deref, DerefMut};
-use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
 use fontpm_api::error::Error;
 use fontpm_api::output::{CliOutput, OutputKind, OutputRecord, set_impl};
 

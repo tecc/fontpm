@@ -1,22 +1,18 @@
 use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
 use std::fs::{copy, create_dir_all};
 use std::path::PathBuf;
-use std::task::Context;
-use clap::{arg, Arg, ArgAction, ArgMatches, Command, value_parser, ValueEnum};
+use clap::{arg, ArgAction, ArgMatches, Command, value_parser};
 use clap::builder::ArgPredicate;
-use futures::StreamExt;
 use multimap::MultiMap;
 use path_clean::PathClean;
-use fontpm_api::{error, FpmHost, info, ok, Source, warning};
+use fontpm_api::{error, FpmHost, info, ok, Source, trace, warning};
 use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontStyle, DefinedFontVariantSpec, DefinedFontWeight, FontInstallSpec};
-use fontpm_api::source::SourceExt;
 use fontpm_api::util::{nice_list, plural_s, plural_s_opposite};
-use crate::commands::{self, CommandAndRunner, Error};
+use crate::commands::{CommandAndRunner, Error};
 use crate::config::FpmConfig;
 use crate::host_impl::FpmHostImpl;
 use crate::runner;
-use crate::sources::{create_sources, create_source, FontSpec};
+use crate::sources::{create_sources, FontSpec};
 
 pub const NAME: &str = "install";
 
@@ -155,12 +151,12 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
 
         let mut resolved_from_source = HashMap::new();
         for source in &target_sources {
-            log::trace!("Running on source {}", source.id());
+            trace!("Running on source {}", source.id());
             let resolved = fonts_to_download.iter()
                 .map(|fontspec| async move {
                     (fontspec.clone(), source.description(), source.resolve_font(&FontInstallSpec::new_all_styles(&fontspec.font_id)).await)
                 });
-            let mut resolved = futures::future::join_all(resolved).await;
+            let resolved = futures::future::join_all(resolved).await;
             for resolved in resolved {
                 if let Some((_, _, Ok(_))) = resolved_from_source.get(&resolved.0.font_id) {
                     continue
@@ -182,7 +178,7 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
                     } else {
                         target_sources.first().unwrap().name()
                     };
-                    log::error!("Could not resolve font {} from {}", entry.0, source_name);
+                    error!("Could not resolve font {} from {}: {}", entry.0, source_name, e);
                     errors = true;
                 }
             }
@@ -194,7 +190,7 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
     }
 
     let (directory, output_format) = match args.get_one::<PathBuf>("directory") {
-        None => (host.font_install_dir(), OutputFormat::Flat),
+        None => (host.font_install_dir(), OutputFormat::FlatDirectory),
         Some(dir) => (dir.clone(), args.get_one("format").unwrap_or(&OutputFormat::FlatDirectory).clone())
     };
     let directory = {
@@ -208,6 +204,7 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
     };
     create_dir_all(&directory)?;
     let sources: HashMap<_, _> = sources.into_iter().map(|v| (v.id().to_string(), v)).collect();
+
     for resolved in resolved {
         let (_, (font_spec, source_desc, install_spec)) = resolved;
         let source = sources.get(&source_desc.id).expect("logic error");
@@ -216,7 +213,7 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
             Ok(paths) => {
                 for (spec, path) in paths {
                     let target_path = output_format.get_path(&directory, &install_spec, &spec, &path) ;
-                    // dbg!(&path, &newpath);
+                    trace!("Copying cache file {} to target path {}", path.display(), target_path.display());
                     if let Some(parent) = target_path.parent() {
                         create_dir_all(parent)?;
                     }

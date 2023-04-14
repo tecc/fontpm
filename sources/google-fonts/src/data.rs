@@ -50,7 +50,7 @@ pub mod description {
             _ => {}
         }
         let mut weight: &str = "";
-        let mut type_str: &str = "";
+        let mut type_str: &str;
         let mut state = 0;
         let mut pi = 0;
         for (i, c) in str.char_indices() {
@@ -114,7 +114,7 @@ impl Data {
             return self.get_all_families_with_tag(tags.first().unwrap())
         }
 
-        let mut tags = tags.clone();
+        let tags = tags.clone();
 
         let mut smallest_tag: String = String::new();
         let mut smallest_tag_vec: Vec<String> = Vec::new();

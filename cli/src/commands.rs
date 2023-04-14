@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter, Write};
-use std::future::Future;
+use std::fmt::Debug;
 use clap::{ArgMatches, Command};
 use fontpm_api::collection;
 
@@ -10,14 +9,14 @@ mod config;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("{0}")]
-    Generic(Box<dyn std::error::Error>),
     #[error("TODO: {}", if let Some(m) = .0 { m.as_ref() } else { "This is not yet implemented." })]
     TODO(Option<String>),
     #[error("{0}")]
     Custom(String),
     #[error("{0}")]
     API(#[from] fontpm_api::Error),
+    #[error("join error: {0}")]
+    Join(#[from] tokio::task::JoinError)
 
 }
 impl From<std::io::Error> for Error {

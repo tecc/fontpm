@@ -12,7 +12,6 @@ extern crate async_trait;
 
 use clap::{arg, ArgAction, Command};
 use clap::parser::ValueSource;
-use semver::Version;
 use fontpm_api::{error, ok};
 use crate::commands::all_commands;
 use crate::output_impl::OutputLevel;

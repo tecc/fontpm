@@ -1,5 +1,3 @@
-use std::fmt::{Formatter, Write};
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("{0}")]

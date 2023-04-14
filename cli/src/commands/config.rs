@@ -1,6 +1,6 @@
 use clap::{arg, ArgAction, ArgMatches, Command};
 use fontpm_api::{info, Error as FError};
-use crate::commands::{self, CommandAndRunner, Error};
+use crate::commands::{CommandAndRunner, Error};
 use crate::runner;
 
 pub const NAME: &str = "config";

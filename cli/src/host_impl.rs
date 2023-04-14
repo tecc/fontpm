@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use semver::Version;
-use toml::value::Table;
 use fontpm_api::FpmHost;
-use crate::config::{EntireConfig, FpmConfig};
+use crate::config::{EntireConfig};
 
+#[derive(Clone)]
 pub struct FpmHostImpl {
     cache_dir: PathBuf,
     font_install_dir: PathBuf,
