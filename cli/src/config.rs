@@ -35,7 +35,7 @@ impl EntireConfig {
     }
     pub fn config_file() -> PathBuf {
         let mut path = Self::config_dir();
-        path.push("CONFIG.toml");
+        path.push("config.toml");
 
         path
     }
