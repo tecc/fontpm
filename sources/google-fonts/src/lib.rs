@@ -5,14 +5,14 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, File};
 use std::path::{Path, PathBuf};
 use default_env::default_env;
-use fontpm_api::{debug, FpmHost, Source, trace};
+use fontpm_api::{FpmHost, Source, trace};
 use fontpm_api::async_trait::async_trait;
 use fontpm_api::host::EmptyFpmHost;
 use fontpm_api::source::{RefreshOutput};
 use fontpm_api::Error;
 use std::io::{Error as IOError, ErrorKind as IOErrorKind, Read, Write};
 use reqwest::{Client, ClientBuilder};
-use serde::{Deserialize, Serialize};
+use serde::{Serialize};
 use serde::de::DeserializeOwned;
 use sha2::{Sha256, Digest};
 use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontVariantSpec, FontInstallSpec};
@@ -173,15 +173,17 @@ impl<'host> Source<'host> for GoogleFontsSource<'host> {
         )
     }
 
-    async fn refresh(&self) -> Result<RefreshOutput, Error> {
+    async fn refresh(&self, force: bool) -> Result<RefreshOutput, Error> {
         let cache_file = self.cache_file(DATA_FILE);
-        let current = self.last_downloaded_commit();
-        trace!("[{}] Last downloaded commit: {}", Self::ID, current.clone().unwrap_or("<none>".into()));
         let latest = self.latest_commit().await?;
         trace!("[{}] Latest commit: {}", Self::ID, latest);
 
-        if current != None && cache_file.exists() && current.unwrap() == latest {
-            return Ok(RefreshOutput::AlreadyUpToDate)
+        if !force {
+            let current = self.last_downloaded_commit();
+            trace!("[{}] Last downloaded commit: {}", Self::ID, current.clone().unwrap_or("<none>".into()));
+            if current != None && cache_file.exists() && current.unwrap() == latest {
+                return Ok(RefreshOutput::AlreadyUpToDate)
+            }
         }
 
         let index = self.get_data().await?;

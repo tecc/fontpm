@@ -18,7 +18,7 @@ pub trait Source<'host> {
 
     fn set_host(&mut self, host: &'host dyn FpmHost);
 
-    async fn refresh(&self) -> Result<RefreshOutput, Error>;
+    async fn refresh(&self, force_refresh: bool) -> Result<RefreshOutput, Error>;
     async fn resolve_font(&self, spec: &FontInstallSpec) -> Result<DefinedFontInstallSpec, Error>;
     async fn download_font(&self, spec: &DefinedFontInstallSpec, dir: &PathBuf) -> Result<HashMap<DefinedFontVariantSpec, PathBuf>, Error>;
     fn description(&self) -> SourceDescription {

@@ -1,5 +1,5 @@
-use clap::{ArgMatches, Command};
-use fontpm_api::{debug, error, Error as FError, info, Source};
+use clap::{arg, ArgAction, ArgMatches, Command};
+use fontpm_api::{debug, error, info, Source, warning};
 use fontpm_api::source::RefreshOutput;
 use fontpm_api::util::{nice_list, plural_s};
 use crate::commands::{self, Error, CommandAndRunner};
@@ -10,6 +10,7 @@ use crate::sources::create_sources;
 pub const NAME: &str = "refresh";
 
 runner! { args =>
+    let force = args.get_flag("force");
     let host = FpmHostImpl::create(None)?;
     let sources = create_sources(Some(&host), None)?;
 
@@ -22,15 +23,19 @@ runner! { args =>
 
     let results = futures::executor::block_on(futures::future::join_all(
         sources.iter().map(|source| async {
-            let result = source.refresh().await;
+            let result = source.refresh(force).await;
             match result {
-                Ok(v) => {
-                    debug!("[{}] Successfully refreshed{}", source.name(), if v == RefreshOutput::AlreadyUpToDate {
-                        " (already up-to-date)"
+                Ok(output) => {
+                    if force && output == RefreshOutput::AlreadyUpToDate {
+                        warning!("{} is already up-to-date - this should not happen and is an error on the developers' part. Please report this issue at https://github.com/tecc/fontpm.", source.name());
                     } else {
-                        ""
-                    });
-                    Ok(v)
+                        debug!("[{}] Successfully refreshed{}", source.name(), if output == RefreshOutput::AlreadyUpToDate {
+                            " (already up-to-date)"
+                        } else {
+                            ""
+                        });
+                    }
+                    Ok(output)
                 },
                 Err(e) => {
                     error!("[{}] Error when refreshing: {}", source.name(), e);
@@ -74,7 +79,11 @@ runner! { args =>
 pub fn command() -> CommandAndRunner {
     return CommandAndRunner {
         description: Command::new(NAME)
-            .about("Refresh the local index of all available fonts"),
+            .about("Refresh the local index of all available fonts")
+            .arg(
+                arg!(-f --force "Forces fontpm to pull the data, ignoring any caches.")
+                    .action(ArgAction::SetTrue)
+            ),
         runner: Box::new(runner)
     };
 }
