@@ -6,7 +6,7 @@ A package-manager like tool to install fonts.
 repository = "https://github.com/tecc/fontpm"
 keywords = ["fontpm", "fonts"]
 categories = ["command-line-utilities", "multimedia", "web-programming"]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 readme = "../README.md"
