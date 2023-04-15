@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use clap::{ArgMatches, Command};
 use fontpm_api::collection;
+use crate::generate;
 
 pub mod refresh;
 pub mod install;
@@ -16,7 +17,9 @@ pub enum Error {
     #[error("{0}")]
     API(#[from] fontpm_api::Error),
     #[error("join error: {0}")]
-    Join(#[from] tokio::task::JoinError)
+    Join(#[from] tokio::task::JoinError),
+    #[error("generation failed: {0}")]
+    Generate(#[from] generate::GenerateError)
 
 }
 impl From<std::io::Error> for Error {

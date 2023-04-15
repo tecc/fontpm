@@ -178,3 +178,8 @@ impl FontDescription {
         }
     }
 }
+impl AsRef<FontDescription> for FontDescription {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}

@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 use std::fs::{copy, create_dir_all};
-use std::path::PathBuf;
+use std::mem::{replace};
+use std::path::{Path, PathBuf};
 use clap::{arg, ArgAction, ArgMatches, Command, value_parser};
 use clap::builder::ArgPredicate;
 use multimap::MultiMap;
 use path_clean::PathClean;
 use fontpm_api::{error, FpmHost, info, ok, Source, trace, warning};
-use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontStyle, DefinedFontVariantSpec, DefinedFontWeight, FontInstallSpec};
+use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontStyle, DefinedFontVariantSpec, DefinedFontWeight, FontDescription, FontInstallSpec};
 use fontpm_api::util::{nice_list, plural_s, plural_s_opposite};
 use crate::commands::{CommandAndRunner, Error};
 use crate::config::FpmConfig;
+use crate::generate::Generate;
 use crate::host_impl::FpmHostImpl;
 use crate::runner;
 use crate::sources::{create_sources, FontSpec};
@@ -24,7 +26,9 @@ enum OutputFormat {
     FlatDirectory,
 }
 impl OutputFormat {
-    fn get_path(&self, base_dir: &PathBuf, font_spec: &DefinedFontInstallSpec, variant_spec: &DefinedFontVariantSpec, source_path: &PathBuf) -> PathBuf {
+    fn get_path(&self, base_dir: impl AsRef<Path>, font_spec: &DefinedFontInstallSpec, variant_spec: &DefinedFontVariantSpec, source_path: impl AsRef<Path>) -> PathBuf {
+        let base_dir = base_dir.as_ref();
+        let source_path = source_path.as_ref();
         let ext = source_path.extension().map(|v| String::from(".") + v.to_str().unwrap()).unwrap_or("".to_string());
         let file_name = format!("{}{}{}", font_spec.id, {
             if variant_spec == &DefinedFontVariantSpec::REGULAR {
@@ -42,12 +46,20 @@ impl OutputFormat {
             }
         }, ext);
         match self {
-            OutputFormat::Flat => {
+            Self::Flat => {
                 base_dir.join(file_name)
             }
-            OutputFormat::FlatDirectory => {
+            Self::FlatDirectory => {
                 base_dir.join(&font_spec.id).join(file_name)
             }
+        }
+    }
+    fn get_misc_path(&self, base_dir: impl AsRef<Path>, font_desc: &FontDescription, name: impl AsRef<Path>) -> PathBuf {
+        let base_dir = base_dir.as_ref();
+        let name = name.as_ref();
+        match self {
+            Self::Flat => base_dir.join(name),
+            Self::FlatDirectory => base_dir.join(&font_desc.id).join(name)
         }
     }
 }
@@ -188,9 +200,9 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
         return Err(Error::Custom(format!("Some fonts failed to resolve.")));
     }
 
-    let (directory, output_format) = match args.get_one::<PathBuf>("directory") {
-        None => (host.font_install_dir(), OutputFormat::FlatDirectory),
-        Some(dir) => (dir.clone(), args.get_one("format").unwrap_or(&OutputFormat::FlatDirectory).clone())
+    let (directory, output_format, generate_css) = match args.get_one::<PathBuf>("directory") {
+        None => (host.font_install_dir(), OutputFormat::FlatDirectory, false),
+        Some(dir) => (dir.clone(), args.get_one("format").unwrap_or(&OutputFormat::FlatDirectory).clone(), args.get_flag("generate-css"))
     };
     let directory = {
         let mut dir = directory.clean();
@@ -209,14 +221,23 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
         let source = sources.get(&source_desc.id).expect("logic error");
         info!("Installing {} from {}", font_desc.name, source_desc.name);
         match source.download_font(&install_spec, &host.cache_dir_for(source.id())).await {
-            Ok(paths) => {
-                for (spec, path) in paths {
+            Ok(mut paths) => {
+                for (spec, path) in &mut paths {
                     let target_path = output_format.get_path(&directory, &install_spec, &spec, &path) ;
                     trace!("Copying cache file {} to target path {}", path.display(), target_path.display());
                     if let Some(parent) = target_path.parent() {
                         create_dir_all(parent)?;
                     }
                     copy(&path, &target_path)?;
+                    if generate_css {
+                        let _ = replace(path, target_path);
+                    }
+                }
+                if generate_css {
+                    let target = output_format.get_misc_path(&directory, &font_desc, format!("{}.css", font_desc.id));
+                    let generate = Generate::from_font(&target, &font_desc, paths);
+                    let generated = generate.generate_css()?;
+                    tokio::fs::write(&target, generated).await?;
                 }
             },
             Err(e) => {
@@ -262,7 +283,10 @@ or as <source ID>:<font ID> (e.g. \"google-fonts:noto-sans\")."
                 arg!(-f --format <format> "The format to install the fonts in. Will be ignored without -d.")
                     .value_parser(value_parser!(OutputFormat))
                     .required(false)
-                    .default_value_if("directory", ArgPredicate::IsPresent, "flat-directory")
+                    .default_value_if("directory", ArgPredicate::IsPresent, "flat-directory"),
+                arg!(--"generate-css" "Generate @font-face rules for CSS. Will be ignored without -d.")
+                    .alias("css")
+                    .action(ArgAction::SetTrue)
             ])
         ,
         runner: Box::new(runner)

@@ -416,6 +416,7 @@ dependencies = [
  "lazy_static",
  "multimap",
  "paris",
+ "path-calculate",
  "path-clean",
  "semver",
  "serde",
@@ -984,10 +985,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "path-absolutize"
+version = "3.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f1d4993b16f7325d90c18c3c6a3327db7808752db8d208cea0acee0abd52c52"
+dependencies = [
+ "path-dedot",
+]
+
+[[package]]
+name = "path-calculate"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4690055139867a4a0d11d18ab98d80b325d7aa573b99e0ae8e1bc787a4282da7"
+dependencies = [
+ "path-absolutize",
+]
+
+[[package]]
 name = "path-clean"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17359afc20d7ab31fdb42bb844c8b3bb1dabd7dcf7e68428492da7f16966fcef"
+
+[[package]]
+name = "path-dedot"
+version = "3.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a81540d94551664b72b72829b12bd167c73c9d25fbac0e04fafa8023f7e4901"
+dependencies = [
+ "once_cell",
+]
 
 [[package]]
 name = "percent-encoding"
