@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt::{Debug, Display, Formatter, Write};
 use std::str::FromStr;
 use crate::Error;
 
@@ -25,6 +26,14 @@ impl DefinedFontWeight {
         }
     }
 }
+impl Display for DefinedFontWeight {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DefinedFontWeight::Fixed(w) => Display::fmt(w, f),
+            DefinedFontWeight::Variable => f.write_str("variable")
+        }
+    }
+}
 impl Ord for DefinedFontWeight {
     fn cmp(&self, other: &Self) -> Ordering {
         match self {
@@ -39,7 +48,6 @@ impl Ord for DefinedFontWeight {
         }
     }
 }
-
 impl PartialOrd<Self> for DefinedFontWeight {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -102,7 +110,11 @@ impl AsRef<str> for DefinedFontStyle {
         }
     }
 }
-
+impl Display for DefinedFontStyle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_ref())
+    }
+}
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
 pub enum FontStyle {
