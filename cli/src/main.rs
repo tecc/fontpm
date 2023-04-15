@@ -4,6 +4,7 @@ mod host_impl;
 mod sources;
 mod config;
 mod build_config;
+mod generate;
 
 #[macro_use]
 extern crate lazy_static;
