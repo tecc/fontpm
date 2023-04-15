@@ -1,4 +1,4 @@
-use clap::{arg, ArgAction, ArgMatches, Command};
+use clap::{arg, ArgAction, ArgMatches, Command, Subcommand, FromArgMatches};
 use fontpm_api::{info, Error as FError};
 use crate::commands::{CommandAndRunner, Error};
 use crate::runner;
@@ -7,11 +7,19 @@ pub const NAME: &str = "config";
 
 const CMD_PRINT: &str = "print";
 
+#[derive(Subcommand)]
+enum ConfigCommand {
+    Print {
+        raw: bool
+    }
+}
+
 runner! { master_args =>
     // TODO: Setting configuration values
-    match master_args.subcommand().unwrap() {
-        (CMD_PRINT, args) => {
-            if args.get_flag("raw") {
+    let cmd = ConfigCommand::from_arg_matches(master_args)?;
+    match cmd {
+        ConfigCommand::Print { raw } => {
+            if raw {
                 let config = crate::config::EntireConfig::load()?;
                 let toml = toml::ser::to_string_pretty(&config)
                     .map_err(|v| Error::API(FError::Serialisation(v.to_string())))?;
@@ -49,9 +57,6 @@ runner! { master_args =>
             }
 
             Ok(None)
-        },
-        (other_cmd, _) => {
-            Err(Error::TODO(Some(format!("The subcommand {} is not yet implemented.", other_cmd))))
         }
     }
 }
@@ -59,7 +64,7 @@ runner! { master_args =>
 pub fn command() -> CommandAndRunner {
     return CommandAndRunner {
         description: Command::new(NAME)
-            .about("Gets and sets configuration values")
+            .about("Utilities for reading and updating the configuration.")
             .subcommands(vec![
                 Command::new(CMD_PRINT)
                     .about("Prints the in-memory configuration")

@@ -19,7 +19,9 @@ pub enum Error {
     #[error("join error: {0}")]
     Join(#[from] tokio::task::JoinError),
     #[error("generation failed: {0}")]
-    Generate(#[from] generate::GenerateError)
+    Generate(#[from] generate::GenerateError),
+    #[error("invalid argument(s): {0}")]
+    ArgMatch(#[from] clap::Error)
 
 }
 impl From<std::io::Error> for Error {
@@ -44,6 +46,8 @@ pub trait Runner {
         #[async_trait]
         impl $crate::commands::Runner for $name {
             async fn run(&self, $args: &::clap::ArgMatches) -> $crate::commands::Result {
+                #[allow(unused_imports)]
+                use ::clap::FromArgMatches;
                 $($tokens)*
             }
         }

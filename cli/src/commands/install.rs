@@ -267,7 +267,7 @@ runner! { args => _runner(args).await }
 pub fn command() -> CommandAndRunner {
     return CommandAndRunner {
         description: Command::new(NAME)
-            .about("Install a font")
+            .about("Install fonts, either globally or to a specific directory.")
             .args(vec![
                 arg!(<fontspec> "Specify the fonts to install")
                     .long_help(
