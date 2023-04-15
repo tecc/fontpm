@@ -4,8 +4,8 @@ use clap::{ArgMatches, Command};
 use fontpm_api::collection;
 use crate::generate;
 
-pub mod refresh;
-pub mod install;
+mod refresh;
+mod install;
 mod config;
 
 #[derive(thiserror::Error, Debug)]
@@ -38,18 +38,18 @@ pub trait Runner {
     async fn run(&self, matches: &ArgMatches) -> Result;
 }
 #[macro_export] macro_rules! runner {
-    {$name:tt: $args:tt => $($tokens:tt)+} => {
+    {$name:tt: $args:tt => $($tokens:tt)*} => {
         #[allow(non_camel_case_types)]
         struct $name;
         #[async_trait]
         impl $crate::commands::Runner for $name {
-            async fn run(&self, $args: &ArgMatches) -> $crate::commands::Result {
-                $($tokens)+
+            async fn run(&self, $args: &::clap::ArgMatches) -> $crate::commands::Result {
+                $($tokens)*
             }
         }
     };
-    {$args:tt => $($tokens:tt)+} => {
-        runner!{runner: $args => $($tokens)+}
+    {$args:tt => $($tokens:tt)*} => {
+        runner!{runner: $args => $($tokens)*}
     }
 }
 

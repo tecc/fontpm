@@ -13,8 +13,7 @@ readme = "../README.md"
 
 [dependencies]
 async-trait = "0.1.68"
-clap = { version = "4.2.2" }
-clap_derive = "4.2.0"
+clap = { version = "4.2.2", features = ["derive"] }
 dirs = "5.0.0"
 env_logger = "0.10.0"
 fontpm-api = { path = "../api", version = "0.2" }

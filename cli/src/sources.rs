@@ -25,7 +25,7 @@ use crate::config::FpmConfig;
 /// let source = create_source(&id);
 /// assert!(source.is_none());
 /// ```
-pub fn create_source<'host>(source: String, _host: Option<&'host dyn FpmHost>) -> Option<impl Source<'host>> {
+pub fn create_source<'host>(source: String, _host: Option<&'host dyn FpmHost>) -> Option<Box<dyn Source<'host> + 'host>> {
     macro_rules! source {
         ($source:expr) => {
             Some({
@@ -33,7 +33,7 @@ pub fn create_source<'host>(source: String, _host: Option<&'host dyn FpmHost>) -
                 if let Some(host) = _host {
                     source.set_host(host);
                 }
-                source
+                Box::new(source)
             })
         }
     }
@@ -44,7 +44,7 @@ pub fn create_source<'host>(source: String, _host: Option<&'host dyn FpmHost>) -
     }
 }
 
-pub fn create_sources<'host>(host: Option<&'host dyn FpmHost>, only: Option<Vec<&String>>) -> fontpm_api::Result<Vec<impl Source<'host>>> {
+pub fn create_sources<'host>(host: Option<&'host dyn FpmHost>, only: Option<Vec<&String>>) -> fontpm_api::Result<Vec<Box<dyn Source<'host> + 'host>>> {
     let config = FpmConfig::load()?.clone();
 
     let only = if let Some(v) = only { v.into_iter().collect() } else { Vec::new() };

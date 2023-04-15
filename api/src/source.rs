@@ -12,7 +12,7 @@ pub enum RefreshOutput {
 }
 
 #[async_trait]
-pub trait Source<'host> {
+pub trait Source<'host>: Send + Sync {
     fn id(&self) -> &'host str;
     fn name(&self) -> &'host str;
 

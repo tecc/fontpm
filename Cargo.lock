@@ -209,6 +209,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b802d85aaf3a1cdb02b224ba472ebdea62014fccfcb269b95a4d76443b5ee5a"
 dependencies = [
  "clap_builder",
+ "clap_derive",
+ "once_cell",
 ]
 
 [[package]]
@@ -407,7 +409,6 @@ version = "0.2.0"
 dependencies = [
  "async-trait",
  "clap",
- "clap_derive",
  "dirs",
  "env_logger",
  "fontpm-api",

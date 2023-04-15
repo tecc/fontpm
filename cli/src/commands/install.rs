@@ -18,7 +18,7 @@ use crate::sources::{create_sources, FontSpec};
 
 pub const NAME: &str = "install";
 
-#[derive(clap_derive::ValueEnum, Clone)]
+#[derive(clap::ValueEnum, Clone)]
 #[value(rename_all = "kebab-case")]
 enum OutputFormat {
     // {font id}-{variant weight}
