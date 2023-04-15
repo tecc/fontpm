@@ -216,7 +216,7 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
     create_dir_all(&directory)?;
     let sources: HashMap<_, _> = sources.into_iter().map(|v| (v.id().to_string(), v)).collect();
 
-    for resolved in resolved {
+    for resolved in &resolved {
         let (_, (_font_spec, source_desc, (install_spec, font_desc))) = resolved;
         let source = sources.get(&source_desc.id).expect("logic error");
         info!("Installing {} from {}", font_desc.name, source_desc.name);
@@ -249,8 +249,8 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
 
     // dbg!(resolved);
 
-    let fonts = match fontspecs.len() {
-        1 => format!("font {}", fontspecs.first().unwrap().font_id),
+    let fonts = match resolved.len() {
+        1 => format!("font {}", resolved.values().last().unwrap().2.1.name),
         len => format!("{} fonts", len)
     };
     let sources = match sources.len() {
