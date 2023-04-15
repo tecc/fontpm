@@ -12,12 +12,12 @@ readme = false
 
 [dependencies]
 async-trait = "0.1.60"
-log = "0.4.17"
 backtrace = { version = "0.3.67", optional = true }
+log = "0.4.17"
 reqwest = { version = "0.11.13", optional = true }
-toml = "0.7.3"
 semver = "1.0.16"
 thiserror = "1.0.40"
+toml = "0.7.3"
 
 [features]
 default = []
