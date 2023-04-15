@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::str::FromStr;
 use crate::Error;
 
@@ -24,6 +25,27 @@ impl DefinedFontWeight {
         }
     }
 }
+impl Ord for DefinedFontWeight {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self {
+            Self::Variable => match other {
+                Self::Variable => Ordering::Equal,
+                Self::Fixed(_) => Ordering::Less
+            },
+            Self::Fixed(self_w) => match other {
+                Self::Variable => Ordering::Greater,
+                Self::Fixed(other_w) => self_w.cmp(other_w)
+            }
+        }
+    }
+}
+
+impl PartialOrd<Self> for DefinedFontWeight {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
 pub enum FontWeight {
     Defined(DefinedFontWeight),
@@ -47,12 +69,11 @@ impl FontWeight {
     }
 }
 
-#[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug, Hash, Ord, PartialOrd)]
 pub enum DefinedFontStyle {
     Regular,
     Italic
 }
-
 impl DefinedFontStyle {
     pub fn is_covered_by(&self, other: &DefinedFontStyle) -> bool {
         // NOTE(tecc): this only exists to have a somewhat consistent API
@@ -81,6 +102,7 @@ impl AsRef<str> for DefinedFontStyle {
         }
     }
 }
+
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
 pub enum FontStyle {
@@ -115,6 +137,20 @@ impl DefinedFontVariantSpec {
         let weight_is_covered = self.weight.is_covered_by(&other.weight);
         let style_is_covered = self.style.is_covered_by(&other.style);
         weight_is_covered && style_is_covered
+    }
+}
+
+impl Ord for DefinedFontVariantSpec {
+
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.weight.cmp(&other.weight)
+            .then_with(|| self.style.cmp(&other.style))
+    }
+}
+
+impl PartialOrd<Self> for DefinedFontVariantSpec {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
