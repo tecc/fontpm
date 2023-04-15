@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use fontpm_api::Error;
-use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontVariantSpec, DefinedFontWeight};
+use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontVariantSpec, DefinedFontWeight, FontDescription as FpmFontDescription};
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct FontDescription {
@@ -24,6 +24,11 @@ impl TryFrom<FontDescription> for DefinedFontInstallSpec {
         let variants = variants?;
 
         Ok(DefinedFontInstallSpec::new(value.id, variants))
+    }
+}
+impl From<FontDescription> for FpmFontDescription {
+    fn from(value: FontDescription) -> Self {
+        FpmFontDescription::new(value.display_name, value.id, value.version)
     }
 }
 

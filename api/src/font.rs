@@ -163,3 +163,18 @@ impl FontInstallSpec {
         Self::new(id, vec![FontVariantSpec { style: FontStyle::All, weight: FontWeight::All }])
     }
 }
+#[derive(Eq, PartialEq, Clone, Debug, Hash)]
+pub struct FontDescription {
+    pub name: String,
+    pub id: String,
+    pub version: String
+}
+impl FontDescription {
+    pub fn new(name: impl ToString, id: impl ToString, version: impl ToString) -> Self {
+        Self {
+            name: name.to_string(),
+            id: id.to_string(),
+            version: version.to_string()
+        }
+    }
+}

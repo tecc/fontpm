@@ -53,7 +53,6 @@ impl OutputFormat {
 }
 
 async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
-
     let config = FpmConfig::load()?;
 
     let fontspecs = args.get_many::<String>("fontspec");
@@ -206,9 +205,9 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
     let sources: HashMap<_, _> = sources.into_iter().map(|v| (v.id().to_string(), v)).collect();
 
     for resolved in resolved {
-        let (_, (font_spec, source_desc, install_spec)) = resolved;
+        let (_, (_font_spec, source_desc, (install_spec, font_desc))) = resolved;
         let source = sources.get(&source_desc.id).expect("logic error");
-        info!("Installing {:?}", font_spec.font_id);
+        info!("Installing {} from {}", font_desc.name, source_desc.name);
         match source.download_font(&install_spec, &host.cache_dir_for(source.id())).await {
             Ok(paths) => {
                 for (spec, path) in paths {
@@ -221,7 +220,7 @@ async fn _runner(args: &ArgMatches) -> Result<Option<String>, Error> {
                 }
             },
             Err(e) => {
-                return Err(Error::Custom(format!("Could not download font {} from {}: {}", font_spec.font_id, source_desc.name, e)))
+                return Err(Error::Custom(format!("Could not download font {} from {}: {}", font_desc.name, source_desc.name, e,)))
             }
         }
         // info!("Installed font!");

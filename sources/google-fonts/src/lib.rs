@@ -15,7 +15,7 @@ use reqwest::{Client, ClientBuilder};
 use serde::{Serialize};
 use serde::de::DeserializeOwned;
 use sha2::{Sha256, Digest};
-use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontVariantSpec, FontInstallSpec};
+use fontpm_api::font::{DefinedFontInstallSpec, DefinedFontVariantSpec, FontInstallSpec, FontDescription as FpmFontDescription};
 use fontpm_api::util::create_parent;
 use crate::data::Data;
 use crate::data::description::variant_to_string;
@@ -193,12 +193,12 @@ impl<'host> Source<'host> for GoogleFontsSource<'host> {
         Ok(RefreshOutput::Downloaded)
     }
 
-    async fn resolve_font(&self, spec: &FontInstallSpec) -> Result<DefinedFontInstallSpec, Error> {
+    async fn resolve_font(&self, spec: &FontInstallSpec) -> Result<(DefinedFontInstallSpec, FpmFontDescription), Error> {
         let data = self.read_data()?;
 
         let family = data.get_family(&spec.id).ok_or(Error::NoSuchFamily(spec.id.clone()))?;
 
-        family.try_into()
+        Ok((family.clone().try_into()?, family.into()))
     }
 
     async fn download_font(&self, font_id: &DefinedFontInstallSpec, dir: &PathBuf) -> Result<HashMap<DefinedFontVariantSpec, PathBuf>, Error> {
