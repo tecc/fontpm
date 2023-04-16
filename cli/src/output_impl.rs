@@ -52,7 +52,7 @@ impl CliOutput for OutputImpl {
             let (color, dimmed, v) = match record.kind {
                 OutputKind::Ok => (Color::Green, false, "ok!"),
                 OutputKind::Error => (Color::Red, false, "error!"),
-                OutputKind::Warning => (Color::Yellow, false, "warn"),
+                OutputKind::Warning => (Color::Yellow, false, "warning!"),
                 OutputKind::Info => (Color::Blue, false, "info"),
                 OutputKind::Debug => (Color::Cyan, true, "debug"),
                 OutputKind::Trace => (Color::White, true, "trace")
