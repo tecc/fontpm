@@ -13,8 +13,8 @@ extern crate async_trait;
 
 use clap::{arg, ArgAction, Command};
 use clap::parser::ValueSource;
-use fontpm_api::{error, ok};
-use crate::commands::all_commands;
+use fontpm_api::{error, ok, warning};
+use crate::commands::{all_commands, Error};
 use crate::output_impl::OutputLevel;
 
 pub const VERSION_STR: &str = env!("CARGO_PKG_VERSION");
@@ -80,8 +80,13 @@ async fn main() {
                     ok!("{}", message);
                 }
             },
-            Err(e) => {
-                error!("{}", e);
+            Err(e) => match e {
+                Error::ConfirmationNeeded(message) => {
+                    warning!("Confirmation needed: {}", message);
+                }
+                e => {
+                    error!("{}", e);
+                }
             }
         }
     } else {
