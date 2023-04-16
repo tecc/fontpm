@@ -34,9 +34,20 @@ impl Display for DefinedFontWeight {
         }
     }
 }
+
 impl Ord for DefinedFontWeight {
+    /// [`Ord`] implementation for [`DefinedFontWeight`].
+    /// The implementation defines the ordering as follows (from least to greatest):
+    /// - Variable
+    /// - Regular weight (400)
+    /// - Int comparison
     fn cmp(&self, other: &Self) -> Ordering {
         match self {
+            &Self::REGULAR => match other {
+                &Self::REGULAR => Ordering::Equal,
+                Self::Variable => Ordering::Greater,
+                Self::Fixed(_) => Ordering::Less
+            },
             Self::Variable => match other {
                 Self::Variable => Ordering::Equal,
                 Self::Fixed(_) => Ordering::Less
@@ -153,7 +164,6 @@ impl DefinedFontVariantSpec {
 }
 
 impl Ord for DefinedFontVariantSpec {
-
     fn cmp(&self, other: &Self) -> Ordering {
         self.weight.cmp(&other.weight)
             .then_with(|| self.style.cmp(&other.style))
@@ -229,5 +239,37 @@ impl FontDescription {
 impl AsRef<FontDescription> for FontDescription {
     fn as_ref(&self) -> &Self {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weight_ordering() {
+        use DefinedFontWeight as W;
+        assert!(W::Fixed(100) < W::Fixed(200));
+        assert!(W::Fixed(200) < W::Fixed(300));
+        assert!(W::Fixed(900) > W::Fixed(800));
+        assert!(W::Fixed(800) > W::Fixed(700));
+        // Variable is considered the least out of all weights
+        assert!(W::Variable < W::Fixed(100));
+        assert!(W::Variable < W::Fixed(300));
+        assert!(W::Variable < W::Fixed(500));
+        assert!(W::Variable < W::Fixed(700));
+        assert!(W::Variable < W::Fixed(900));
+        assert!(W::Variable < W::REGULAR);
+        /* Regular (or Fixed(400)) is next up */
+        // The following should pass either way
+        assert!(W::REGULAR < W::Fixed(900));
+        assert!(W::REGULAR < W::Fixed(800));
+        assert!(W::REGULAR < W::Fixed(700));
+        assert!(W::REGULAR < W::Fixed(600));
+        assert!(W::REGULAR < W::Fixed(500));
+        // The next ones would not pass without the specifics of the current implementation
+        assert!(W::REGULAR < W::Fixed(300));
+        assert!(W::REGULAR < W::Fixed(200));
+        assert!(W::REGULAR < W::Fixed(100));
     }
 }
