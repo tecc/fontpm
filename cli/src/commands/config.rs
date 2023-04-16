@@ -29,31 +29,49 @@ runner! { master_args =>
                 let config = crate::config::FpmConfig::load()?;
 
                 macro_rules! config_write_stringify {
-                    (array $value:expr) => {
-                        format!("[{}] {}", $value.len(), $value.join(", "))
-                    };
-                    (path $value:expr) => {
-                        format!("{}", $value.to_string_lossy())
-                    };
-                    (option:$kind:tt$(:$kind_extra:tt)* $value:expr) => {
-                        if let Some(v) = $value {
-                            config_write_stringify!($kind$(:$kind_extra)* v)
+                    (option:$kind:tt$(:$kind_extra:tt)* $value:expr; default $dkind:tt$(:$dkind_extra:tt)* $default:expr;) => {
+                        if let Some(value) = &$value {
+                            config_write_stringify!($kind$(:$kind_extra)* value;)
                         } else {
-                            format!("<not set>")
+                            let strinigifed = config_write_stringify!($dkind$(:$dkind_extra)* $default;);
+                            format!("<not set> [default: {}]", strinigifed)
                         }
+                    };
+                    (option:$kind:tt$(:$kind_extra:tt)* $value:expr;) => {
+                        if let Some(value) = &$value {
+                            config_write_stringify!($kind$(:$kind_extra)* value;)
+                        } else {
+                            "<not set>".to_string()
+                        }
+                    };
+                    (array:$kind:tt$(:$kind_extra:tt)* $value:expr;) => {{
+                        let stringified: Vec<String> = $value.iter().map(|v| {
+                            config_write_stringify!($kind$(:$kind_extra)* v;)
+                        }).collect();
+                        let stringified = stringified.join(", ");
+                        format!("[{}] {}", $value.len(), stringified)
+                    }};
+                    (path $value:expr;) => {{
+                        let value = &$value;
+                        let path: &::std::path::Path = value.as_ref();
+                        format!("{}", path.display())
+                    }};
+                    (string $value:expr;) => {
+                        format!("\"{}\"", $value)
                     };
                 }
                 macro_rules! config_write {
+                    ($id:literal => $kind:tt$(:$kind_extra:tt)* $value:expr; $($extra:tt)*) => {{
+                        info!("{}: {}", $id, config_write_stringify!($kind$(:$kind_extra)* $value; $($extra)*));
+                    }};
                     ($id:literal => $kind:tt$(:$kind_extra:tt)* $value:expr) => {
-                        info!("{}: {}", $id, config_write_stringify!($kind$(:$kind_extra)* $value))
-                    };
+                        config_write!($id => $kind$(:$kind_extra)* $value;)
+                    }
                 }
-
                 // might've overcomplicated this severely but i like it
-                config_write!("fontpm.enabled_sources" => array config.enabled_sources);
-                config_write!("fontpm.cache_dir" => option:path config.cache_dir);
-                config_write!("fontpm.font_install_dir" => option:path config.font_install_dir);
-
+                config_write!("fontpm.enabled_sources" => array:string config.enabled_sources);
+                config_write!("fontpm.cache_dir" => option:path config.cache_dir; default path config.cache_dir(););
+                config_write!("fontpm.font_install_dir" => option:path config.font_install_dir; default path config.font_install_dir(););
             }
 
             Ok(None)
