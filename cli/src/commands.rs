@@ -7,6 +7,7 @@ use crate::generate;
 mod refresh;
 mod install;
 mod config;
+mod purge;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -21,7 +22,9 @@ pub enum Error {
     #[error("generation failed: {0}")]
     Generate(#[from] generate::GenerateError),
     #[error("invalid argument(s): {0}")]
-    ArgMatch(#[from] clap::Error)
+    ArgMatch(#[from] clap::Error),
+    #[error("{0}")]
+    ConfirmationNeeded(String)
 
 }
 impl From<std::io::Error> for Error {
@@ -61,6 +64,7 @@ pub fn all_commands() -> HashMap<String, CommandAndRunner> {
     return collection!{
         config::NAME => config::command(),
         refresh::NAME => refresh::command(),
-        install::NAME => install::command()
+        install::NAME => install::command(),
+        purge::NAME => purge::command()
     };
 }
