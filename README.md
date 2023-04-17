@@ -51,11 +51,13 @@ FontPM downloads indices of available fonts for each source, but it doesn't do t
 fontpm refresh
 ```
 
-### Installing a font to your machine
+### Installing fonts
+
+#### To your machine
 
 > **WARNING**
 > 
-> This may not work on all platforms. It should work with any XDG Base Directory-compliant Linux system, but beyond that it's untested.
+> Installing fonts globally may not work on all platforms. It should work with any XDG Base Directory-compliant Linux system, but beyond that it's untested.
 
 To install a font to your machine, simply run the following command:
 
@@ -67,7 +69,7 @@ Substitute `<font-id>` with whatever font you want to install. This is usually i
 
 To install multiple fonts, simply list font IDs separated by spaces.
 
-### Installing a font to a directory (e.g. for a project)
+#### To a directory (e.g. for a project)
 
 Installing fonts to a specific directory is done similarly to installing them globally.
 Simply run the following command, substituting `<font-id>` for whatever fonts you want to use and `<directory>` for whatever directory you want to install the font
@@ -102,6 +104,21 @@ If you use `flat`, the files will look a bit like this:
 |  |_ italic.ttf
 |  |_ regular.ttf 
 ```
+
+### Purging FontPM data
+
+> **WARNING**
+> 
+> This command has the ability to delete *all* FontPM files irrevocably.
+> Be sure of what you're doing.
+
+In some cases, you may decide you want to purge FontPM-created files (perhaps to save storage space on your device).
+This can be done using the `purge` command:
+```bash
+fontpm purge <target>
+```
+
+The `target` argument specifies what you want to delete. It currently allows three values: `cache` (which targets the cached files that FontPM uses), `fonts` (or `installed-fonts`, which targets all installed fonts), and `all` (which targets both of the former targets).
 
 
 ## Configuration
