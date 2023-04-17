@@ -12,8 +12,8 @@ pub const NAME: &str = "purge";
 #[value(rename_all = "kebab-case")]
 enum PurgeTarget {
     Cache,
-    #[value(alias = "fonts")]
-    InstalledFonts,
+    #[value(alias = "installed-fonts")]
+    Fonts,
     All
 }
 
@@ -31,7 +31,7 @@ async fn purge(target: PurgeTarget, config: FpmConfig) -> Result<String, Error> 
                 Ok("Cache already purged.".to_string())
             }
         },
-        PurgeTarget::InstalledFonts => {
+        PurgeTarget::Fonts => {
             let dir = config.font_install_dir();
             if dir.exists() {
                 info!("Purging installed fonts - you will need to reinstall any fonts you've already installed.");
@@ -53,7 +53,7 @@ runner! { args =>
     if !confirm {
         return Err(Error::ConfirmationNeeded(format!("{} {}", match target {
             PurgeTarget::Cache => "Are you sure you want to purge the cache?",
-            PurgeTarget::InstalledFonts => "Are you sure you want to purge all FontPM-installed fonts?",
+            PurgeTarget::Fonts => "Are you sure you want to purge all FontPM-installed fonts?",
             PurgeTarget::All => "Are you sure you want to purge all FontPM data?"
         }, SUFFIX)))
     }
@@ -95,9 +95,8 @@ pub fn command() -> CommandAndRunner {
     let command = Command::new(NAME)
         .about("Purges all of FontPM's cached files.")
         .args(vec![
-            arg!([target] "What to purge. Can be either 'cache', 'fonts', or 'all'")
-                .value_parser(value_parser!(PurgeTarget))
-                .default_value("all"),
+            arg!(<target> "What to purge.")
+                .value_parser(value_parser!(PurgeTarget)),
             arg!(-c --confirm "Confirms that you want to.")
                 .action(ArgAction::SetTrue)
         ]);
