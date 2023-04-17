@@ -283,7 +283,7 @@ or as <source ID>:<font ID> (e.g. \"google-fonts:noto-sans\")."
                 arg!(-f --format <format> "The format to install the fonts in. Will be ignored without -d.")
                     .value_parser(value_parser!(OutputFormat))
                     .required(false)
-                    .default_value_if("directory", ArgPredicate::IsPresent, "flat-directory"),
+                    .default_value("flat-directory"),
                 arg!(--"generate-css" "Generate @font-face rules for CSS. Will be ignored without -d.")
                     .alias("css")
                     .action(ArgAction::SetTrue)
