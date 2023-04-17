@@ -5,7 +5,7 @@ Internal API for [`fontpm`](https://github.com/tecc/fontpm).
 """
 repository = "https://github.com/tecc/fontpm"
 keywords = ["fontpm", "fonts"]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "Apache-2.0"
 readme = false
