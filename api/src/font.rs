@@ -43,17 +43,18 @@ impl Ord for DefinedFontWeight {
     /// - Int comparison
     fn cmp(&self, other: &Self) -> Ordering {
         match self {
-            &Self::REGULAR => match other {
-                &Self::REGULAR => Ordering::Equal,
-                Self::Variable => Ordering::Greater,
-                Self::Fixed(_) => Ordering::Less
-            },
             Self::Variable => match other {
                 Self::Variable => Ordering::Equal,
                 Self::Fixed(_) => Ordering::Less
             },
+            Self::Fixed(400) => match other {
+                Self::Variable => Ordering::Greater,
+                Self::Fixed(400) => Ordering::Equal,
+                Self::Fixed(_) => Ordering::Less
+            },
             Self::Fixed(self_w) => match other {
                 Self::Variable => Ordering::Greater,
+                Self::Fixed(400) => Ordering::Greater,
                 Self::Fixed(other_w) => self_w.cmp(other_w)
             }
         }
@@ -271,5 +272,14 @@ mod tests {
         assert!(W::REGULAR < W::Fixed(300));
         assert!(W::REGULAR < W::Fixed(200));
         assert!(W::REGULAR < W::Fixed(100));
+        // Next up, we do the *exact same thing* but in reverse
+        assert!(W::Fixed(900) > W::Fixed(400));
+        assert!(W::Fixed(800) > W::Fixed(400));
+        assert!(W::Fixed(700) > W::Fixed(400));
+        assert!(W::Fixed(600) > W::Fixed(400));
+        assert!(W::Fixed(500) > W::Fixed(400));
+        assert!(W::Fixed(300) > W::Fixed(400));
+        assert!(W::Fixed(200) > W::Fixed(400));
+        assert!(W::Fixed(100) > W::Fixed(400));
     }
 }
