@@ -1,6 +1,7 @@
 use clap::{arg, ArgAction, ArgMatches, Command, Subcommand, FromArgMatches};
-use fontpm_api::{info, Error as FError};
+use fontpm_api::{info, ok, Error as FError};
 use crate::commands::{CommandAndRunner, Error};
+use crate::config::{EntireConfig, FpmConfig};
 use crate::runner;
 
 pub const NAME: &str = "config";
@@ -9,7 +10,12 @@ const CMD_PRINT: &str = "print";
 
 #[derive(Subcommand)]
 enum ConfigCommand {
+    Path {
+        #[arg(long = "raw", help = "Tells FontPM to print the path without formatting nor newlines.")]
+        raw: bool
+    },
     Print {
+        #[arg(long = "raw", help = "Tells FontPM to print the configuration file as TOML.")]
         raw: bool
     }
 }
@@ -18,15 +24,24 @@ runner! { master_args =>
     // TODO: Setting configuration values
     let cmd = ConfigCommand::from_arg_matches(master_args)?;
     match cmd {
+        ConfigCommand::Path { raw } => {
+            let config_file = EntireConfig::config_file();
+            if raw {
+                print!("{}", config_file.display());
+            } else {
+                ok!("The path to the configuration file is {}", config_file.display());
+            }
+            Ok(None)
+        },
         ConfigCommand::Print { raw } => {
             if raw {
-                let config = crate::config::EntireConfig::load()?;
+                let config = EntireConfig::load()?;
                 let toml = toml::ser::to_string_pretty(&config)
                     .map_err(|v| Error::API(FError::Serialisation(v.to_string())))?;
                 print!("{}", toml);
-                return Ok(None)
+                // Ok(None)
             } else {
-                let config = crate::config::FpmConfig::load()?;
+                let config = FpmConfig::load()?;
 
                 macro_rules! config_write_stringify {
                     (option:$kind:tt$(:$kind_extra:tt)* $value:expr; default $dkind:tt$(:$dkind_extra:tt)* $default:expr;) => {
@@ -80,18 +95,12 @@ runner! { master_args =>
 }
 
 pub fn command() -> CommandAndRunner {
+    let command = Command::new(NAME)
+        .about("Utilities for reading and updating the configuration.")
+        .subcommand_required(true);
+    let command = ConfigCommand::augment_subcommands(command);
     return CommandAndRunner {
-        description: Command::new(NAME)
-            .about("Utilities for reading and updating the configuration.")
-            .subcommands(vec![
-                Command::new(CMD_PRINT)
-                    .about("Prints the in-memory configuration")
-                    .args(vec![
-                        arg!(--raw "Print the configuration as TOML")
-                            .action(ArgAction::SetTrue)
-                    ])
-            ])
-            .subcommand_required(true),
+        description: command,
         runner: Box::new(runner)
     }
 }
