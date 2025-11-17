@@ -1,3 +1,6 @@
+mod config;
+mod list;
+
 use clap::{Parser, Subcommand};
 
 /// FontPM, the font package manager.
