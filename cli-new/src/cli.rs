@@ -20,6 +20,5 @@ pub enum CliCommand {}
 pub fn run() {
     let args = CliArgs::parse();
 
-    match args.command {
-    }
+    match args.command {}
 }
