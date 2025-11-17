@@ -1,5 +1,5 @@
 [workspace]
 members = [
-    "cli", "api",
+    "cli", "cli-new", "api",
     "sources/google-fonts"
 ]
