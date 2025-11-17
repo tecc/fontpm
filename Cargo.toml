@@ -3,3 +3,4 @@ members = [
     "cli", "cli-new", "api",
     "sources/google-fonts"
 ]
+resolver = "3"
