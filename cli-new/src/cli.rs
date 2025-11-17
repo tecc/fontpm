@@ -15,10 +15,14 @@ pub struct CliArgs {
     pub command: CliCommand,
 }
 #[derive(Subcommand)]
-pub enum CliCommand {}
+pub enum CliCommand {
+    Config(config::ConfigArgs),
+}
 
 pub fn run() {
     let args = CliArgs::parse();
 
-    match args.command {}
+    match args.command {
+        CliCommand::Config(config) => config::run(config),
+    }
 }
