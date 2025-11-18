@@ -2,7 +2,7 @@
 
 use crate::cli::CliContext;
 use crate::config::ConfigValue;
-use crate::source::{Refreshed, Source};
+use crate::source::{Refreshed, Source, SourceId};
 use std::sync::Arc;
 
 /// Google Fonts source.
@@ -21,6 +21,10 @@ pub struct GoogleFontsConfig {
 
 #[async_trait]
 impl Source for GoogleFonts {
+    fn id(&self) -> &SourceId {
+        &SourceId::GoogleFonts
+    }
+
     async fn refresh_index(
         context: Arc<CliContext>,
     ) -> anyhow::Result<Refreshed> {

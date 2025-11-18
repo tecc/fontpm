@@ -20,7 +20,7 @@ console = "0.16.1"
 dialoguer = "0.12.0"
 dirs = "6.0.0"
 indicatif = "0.18.3"
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
 thiserror = "2.0.17"
 toml = { version = "0.9.8", features = ["preserve_order"] }
 toml_edit = { version = "0.23.7", features = ["serde"] }

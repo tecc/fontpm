@@ -3,7 +3,7 @@ mod list;
 mod refresh;
 
 use clap::{Parser, Subcommand};
-use console::style;
+use console::{style, StyledObject};
 use std::{fmt, io};
 
 /// FontPM, the font package manager.
@@ -34,6 +34,13 @@ pub fn run() {
 
 pub struct CliContext {
     term: console::Term,
+    /// Whether or not any files should actually be modified: created, deleted,
+    /// edited, etc.
+    ///
+    /// # Behaviour with `modify_files == false`
+    ///
+    /// No operation that would modify a file is permitted. To what extent it
+    /// can be done, simulate it.
     pub modify_files: bool,
 }
 impl CliContext {
@@ -47,15 +54,28 @@ impl CliContext {
     pub fn write_fmt(&self, args: fmt::Arguments) -> io::Result<()> {
         io::Write::write_fmt(&mut &self.term, args)
     }
-    pub fn warn(&'_ self) -> WarnOutput<'_> {
-        WarnOutput(self)
+    pub fn warn(&'_ self) -> PrefixedOutput<'_> {
+        PrefixedOutput {
+            prefix: style("warn:").bold().yellow(),
+            ctx: &self,
+        }
+    }
+
+    pub fn error(&'_ self) -> PrefixedOutput<'_> {
+        PrefixedOutput {
+            prefix: style("error:").bold().red(),
+            ctx: &self,
+        }
     }
 }
 
-pub struct WarnOutput<'a>(&'a CliContext);
-impl<'a> WarnOutput<'a> {
+pub struct PrefixedOutput<'a> {
+    prefix: StyledObject<&'a str>,
+    ctx: &'a CliContext,
+}
+impl<'a> PrefixedOutput<'a> {
     pub fn write_fmt(&self, args: fmt::Arguments) -> io::Result<()> {
-        write!(self.0, "{} ", style("warn:").bold().yellow(),)?;
-        self.0.write_fmt(args)
+        write!(self.ctx, "{} {}", self.prefix, args)?;
+        self.ctx.write_fmt(args)
     }
 }

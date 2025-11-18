@@ -22,6 +22,7 @@ pub struct Config {
 }
 /// Helper macro to load configuration values.
 macro_rules! config {
+    () => {};
     (
         @ $x:ident
         env($variable:literal $(, $map_fn:expr)?)
@@ -38,12 +39,16 @@ macro_rules! config {
     };
     (
         @ $x:ident
-        toml($file_table:expr, $key:literal)
+        toml($file_table:expr, $key:literal $(, map_err: $map_err_fn:expr)?)
         $(, $($remaining:tt)* )?
     ) => {
         let $x = $x.or_else(|| {
             let file_table = &($file_table);
-            file_table.get_key($key)
+            let value = file_table.get_key($key).inner_map(|e| e.map_err(anyhow::Error::from));
+            $(
+                let value = value.inner_map_err($map_err_fn);
+            )?
+            value
         });
         $(config!(@ $x $( $remaining )*);)?
     };
@@ -65,6 +70,14 @@ macro_rules! config {
     };
     (
         @ $x:ident
+        inner_map($($map_fn:expr),*)
+        $(, $($remaining:tt)* )?
+    ) => {
+        $( let $x = $x.inner_map($map_fn); )*
+        $(config!(@ $x $( $remaining )*);)?
+    };
+    (
+        @ $x:ident
     ) => {};
     (
         $($token:tt)*
@@ -80,7 +93,7 @@ macro_rules! config {
 const DEFAULT_CONFIGURATION: &'static str = include_str!("../fontpm.toml");
 
 impl Config {
-    pub fn load(cli: &CliContext) -> Result<Self, ()> {
+    pub fn load(cli: &CliContext) -> anyhow::Result<Self> {
         let paths = ConfigPaths::load();
 
         let fontpm_toml = if paths.fontpm_config_file.resolved.exists() {
@@ -137,26 +150,65 @@ pub struct FontpmConfig {
     /// 2. `fontpm.toml` key: `fontpm.store_dir`
     /// 3. Default: `{dirs::cache_dir()}/fontpm/store`
     pub store_dir: ConfigValue<Arc<Path>>,
+    /// Enabled sources (see [`crate::source`]).
+    ///
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_ENABLED_SOURCES` as a comma-separated list
+    /// 2. `fontpm.toml` key: `fontpm.enabled_sources`
+    /// 3. Default: Google Fonts, if available.
+    pub enabled_sources: ConfigValue<Arc<[crate::source::SourceId]>>,
 }
 impl FontpmConfig {
-    pub fn load(out: &CliContext, fontpm_toml: &FileTable) -> Result<Self, ()> {
-        let store_dir = match config!(
-            env("FONTPM_STORE_DIR", |x| x.map(Ok)),
+    pub fn load(
+        ctx: &CliContext,
+        fontpm_toml: &FileTable,
+    ) -> anyhow::Result<Self> {
+        let store_dir = config!(
+            env("FONTPM_STORE_DIR"),
+            inner_map(Ok),
             toml(fontpm_toml, "fontpm.store_dir"),
             builtin(Ok(dirs::cache_dir()
                 .expect("cache_dir must exist")
-                .join("fontpm/store")))
+                .join("fontpm/store"))),
         )
-        .transpose()
-        {
-            Ok(x) => x.map(to_arc_path),
-            Err(e) => {
-                let _ = write!(out, "Could not load path: {}", e);
-                return Err(());
-            }
-        };
-        Ok(Self { store_dir })
+        .fail(ctx, "store directory")?
+        .map(to_arc_path);
+
+        let enabled_sources = config!(
+            env("FONTPM_ENABLED_SOURCES"),
+            inner_map(comma_separated_list_fromstr),
+            toml(fontpm_toml, "fontpm.enabled_sources"),
+            builtin(Ok(Arc::from(crate::source::DEFAULT_ENABLED_SOURCES)))
+        )
+        .fail(ctx, "enabled sources")?;
+        Ok(Self {
+            store_dir,
+            enabled_sources,
+        })
     }
+}
+fn comma_separated_list_fromstr<T>(input: OsString) -> anyhow::Result<Arc<[T]>>
+where
+    T: std::str::FromStr,
+    anyhow::Error: From<T::Err>,
+{
+    comma_separated_list(input, |a| T::from_str(a))
+}
+fn comma_separated_list<T, E>(
+    input: OsString,
+    mut f: impl FnMut(&str) -> Result<T, E>,
+) -> anyhow::Result<Arc<[T]>>
+where
+    anyhow::Error: From<E>,
+{
+    let mut vec = vec![];
+    let input = input.into_string().map_err(|e| {
+        anyhow::anyhow!("input string could not be converted to a Rust string")
+    })?;
+    for entry in input.split(',') {
+        vec.push(f(entry)?);
+    }
+    Ok(vec.into())
 }
 
 pub struct ConfigPaths {
@@ -180,19 +232,6 @@ pub struct ConfigPaths {
 
 impl ConfigPaths {
     pub fn load() -> Self {
-        fn env_or_default<T>(
-            key: impl AsRef<std::ffi::OsStr>,
-            default: impl FnOnce() -> T,
-        ) -> T
-        where
-            T: From<OsString>,
-        {
-            if let Some(value) = std::env::var_os(key) {
-                T::from(value)
-            } else {
-                default()
-            }
-        }
         let config_dir = config!(
             env("FONTPM_CONFIG_DIR"),
             builtin(
@@ -262,6 +301,15 @@ impl<T, E> ConfigValue<Result<T, E>> {
             resolved: self.resolved.map(transform),
         }
     }
+    pub fn inner_map_err<Q>(
+        self,
+        transform: impl FnOnce(E) -> Q,
+    ) -> ConfigValue<Result<T, Q>> {
+        ConfigValue {
+            source: self.source,
+            resolved: self.resolved.map_err(transform),
+        }
+    }
     pub fn transpose(self) -> Result<ConfigValue<T>, E> {
         match self.resolved {
             Ok(resolved) => Ok(ConfigValue {
@@ -269,6 +317,28 @@ impl<T, E> ConfigValue<Result<T, E>> {
                 resolved,
             }),
             Err(e) => Err(e),
+        }
+    }
+
+    pub fn fail(self, cli: &CliContext, key: &str) -> Result<ConfigValue<T>, E>
+    where
+        E: std::fmt::Debug,
+    {
+        match self.resolved {
+            Ok(x) => Ok(ConfigValue {
+                source: self.source,
+                resolved: x,
+            }),
+            Err(e) => {
+                let _ = writeln!(
+                    cli.error(),
+                    "Could not load {} from {}: {:?}",
+                    key,
+                    self.source,
+                    e
+                );
+                Err(e)
+            }
         }
     }
 }
@@ -330,7 +400,10 @@ impl FileTable {
             path,
         }
     }
-    pub fn load_file(cli: &CliContext, path: &Arc<Path>) -> Result<Self, ()> {
+    pub fn load_file(
+        cli: &CliContext,
+        path: &Arc<Path>,
+    ) -> anyhow::Result<Self> {
         let config_contents = match std::fs::read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) => {
@@ -340,7 +413,7 @@ impl FileTable {
                     path.display(),
                     e
                 );
-                return Err(());
+                return Err(e.into());
             }
         };
         Self::load_str(cli, path, &config_contents)
@@ -349,7 +422,7 @@ impl FileTable {
         cli: &CliContext,
         path: &Arc<Path>,
         content: &str,
-    ) -> Result<Self, ()> {
+    ) -> anyhow::Result<Self> {
         let document = match content.parse::<toml_edit::DocumentMut>() {
             Ok(doc) => doc,
             Err(e) => {
@@ -359,7 +432,7 @@ impl FileTable {
                     path.display(),
                     e
                 );
-                return Err(());
+                return Err(e.into());
             }
         };
         Ok(Self {
@@ -373,7 +446,7 @@ impl FileTable {
         config_key: &'static str,
     ) -> ConfigValue<Option<Result<T, FileTableError>>>
     where
-        T: DeserializeOwned,
+        T: for<'de> serde::Deserialize<'de>,
     {
         const DELIMITER: char = '.';
 
