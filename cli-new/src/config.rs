@@ -8,22 +8,140 @@
 //!
 //! Default location: `{config_dir}/fontpm.toml`
 
+use crate::output::ConsoleOutput;
+use serde::de::{DeserializeOwned, IntoDeserializer};
+use serde::Deserialize;
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub struct Config {
+    pub paths: ConfigPaths,
+    pub fontpm_toml: FileTable,
+    pub fontpm: FontpmConfig,
+}
+/// Helper macro to load configuration values.
+macro_rules! config {
+    (
+        @ $x:ident
+        env($variable:literal $(, $map_fn:expr)?)
+        $(, $($remaining:tt)* )?
+    ) => {
+        let $x = $x.or_else(|| {
+            let env = ConfigValue::from_env_as($variable);
+            $(
+            let env = env.map($map_fn);
+            )?
+            env
+        });
+        $(config!(@ $x $( $remaining )*);)?
+    };
+    (
+        @ $x:ident
+        toml($file_table:expr, $key:literal)
+        $(, $($remaining:tt)* )?
+    ) => {
+        let $x = $x.or_else(|| {
+            let file_table = &($file_table);
+            file_table.get_key($key)
+        });
+        $(config!(@ $x $( $remaining )*);)?
+    };
+    (
+        @ $x:ident
+        builtin($value:expr)
+        $(, $($remaining:tt)* )?
+    ) => {
+        let $x = $x.unwrap_or_else(|| ConfigValue::builtin($value));
+        $(config!(@ $x $( $remaining )*);)?
+    };
+    (
+        @ $x:ident
+        map($map_fn:expr)
+        $(, $($remaining:tt)* )?
+    ) => {
+        let $x = $x.map($map_fn);
+        $(config!(@ $x $( $remaining )*);)?
+    };
+    (
+        @ $x:ident
+    ) => {};
+    (
+        $($token:tt)*
+    ) => {
+        {
+            let value = ConfigValue::builtin(None);
+            config!(@ value $($token)* );
+            value
+        }
+    };
+}
+
+impl Config {
+    pub fn load(out: &ConsoleOutput) -> Result<Self, ()> {
+        let paths = ConfigPaths::load();
+
+        let fontpm_toml = if paths.fontpm_config_file.resolved.exists() {
+            FileTable::load(out, &paths.fontpm_config_file.resolved)?
+        } else {
+            FileTable::new(paths.fontpm_config_file.resolved.clone())
+        };
+
+        let fontpm = FontpmConfig::load(out, &fontpm_toml)?;
+
+        Ok(Self {
+            paths,
+            fontpm_toml,
+            fontpm
+        })
+    }
+}
+
+pub struct FontpmConfig {
+    /// Path to the file store.
+    ///
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_STORE_DIR`
+    /// 2. `fontpm.toml` key: `fontpm.store_dir`
+    /// 3. Default: `{dirs::cache_dir()}/fontpm/store`
+    pub store_dir: ConfigValue<Arc<Path>>,
+}
+impl FontpmConfig {
+    pub fn load(out: &ConsoleOutput, fontpm_toml: &FileTable) -> Result<Self, ()> {
+        let store_dir = match config!(
+            env("FONTPM_STORE_DIR", |x| x.map(Ok)),
+            toml(fontpm_toml, "fontpm.store_dir"),
+            builtin(Ok(dirs::cache_dir()
+                .expect("cache_dir must exist")
+                .join("fontpm/store")))
+        )
+            .transpose()
+        {
+            Ok(x) => x.map(to_arc_path),
+            Err(e) => {
+                let _ = write!(out, "Could not load path: {}", e);
+                return Err(());
+            }
+        };
+        Ok(Self { store_dir })
+    }
+}
+
 pub struct ConfigPaths {
     /// Path to the configuration directory.
     ///
-    /// Can be overridden by using the `FONTPM_CONFIG_DIR` environment variable.
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_CONFIG_DIR`
+    /// 2. Default: `{dirs::preference_dir()}/fontpm`
     ///
     /// Example: `/home/Alice/.config/fontpm`
     pub config_dir: ConfigValue<Arc<Path>>,
     /// Path to the main configuration file, `fontpm.toml`.
     ///
-    /// Can be overridden by using the `FONTPM_CONFIG_FILE` environment
-    /// variable.
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_CONFIG_FILE`
+    /// 2. Default: `{config_dir}/fontpm.toml`.
     ///
     /// Example: `/home/Alice/.config/fontpm/fontpm.toml`.
     pub fontpm_config_file: ConfigValue<Arc<Path>>,
@@ -44,19 +162,20 @@ impl ConfigPaths {
                 default()
             }
         }
-        // NOTE(tecc): `cargo fmt` gives this formatting, even though it's ugly
-        let config_dir =
-            ConfigValue::from_env_or_builtin("FONTPM_CONFIG_DIR", || {
+        let config_dir = config!(
+            env("FONTPM_CONFIG_DIR"),
+            builtin(
                 dirs::preference_dir()
                     .expect("preference_dir required")
                     .join("fontpm")
-            })
-            .map(to_arc_path);
-        let fontpm_config_file =
-            ConfigValue::from_env_or_builtin("FONTPM_CONFIG_FILE", || {
-                config_dir.resolved.join("fontpm.toml")
-            })
-            .map(to_arc_path);
+            ),
+            map(to_arc_path)
+        );
+        let fontpm_config_file = config!(
+            env("FONTPM_CONFIG_FILE"),
+            builtin(config_dir.resolved.join("fontpm.toml")),
+            map(to_arc_path)
+        );
         Self {
             config_dir,
             fontpm_config_file,
@@ -73,41 +192,25 @@ pub struct ConfigValue<T> {
     pub source: ConfigValueSource,
     pub resolved: T,
 }
+
 impl<T> ConfigValue<T> {
-    pub fn env(
-        variable: &'static str,
-        transform: impl FnOnce(OsString) -> T,
-    ) -> Option<Self> {
-        if let Some(value) = std::env::var_os(variable) {
-            Some(Self {
-                source: ConfigValueSource::Environment(variable),
-                resolved: transform(value),
-            })
-        } else {
-            None
+    pub fn from_env(variable: &'static str) -> ConfigValue<Option<OsString>> {
+        ConfigValue {
+            source: ConfigValueSource::Environment(variable),
+            resolved: std::env::var_os(variable),
         }
     }
-    pub fn from_env(variable: &'static str) -> Option<Self>
+    pub fn from_env_as(variable: &'static str) -> ConfigValue<Option<T>>
     where
         T: From<OsString>,
     {
-        Self::env(variable, T::from)
+        Self::from_env(variable).inner_map(T::from)
     }
     pub fn builtin(value: T) -> Self {
         Self {
             source: ConfigValueSource::Builtin,
             resolved: value,
         }
-    }
-
-    pub fn from_env_or_builtin(
-        variable: &'static str,
-        default: impl FnOnce() -> T,
-    ) -> Self
-    where
-        T: From<OsString>,
-    {
-        Self::from_env(variable).unwrap_or_else(|| Self::builtin(default()))
     }
 
     pub fn map<O>(self, f: impl FnOnce(T) -> O) -> ConfigValue<O> {
@@ -118,11 +221,189 @@ impl<T> ConfigValue<T> {
     }
 }
 
+impl<T, E> ConfigValue<Result<T, E>> {
+    pub fn inner_map<Q>(
+        self,
+        transform: impl FnOnce(T) -> Q,
+    ) -> ConfigValue<Result<Q, E>> {
+        ConfigValue {
+            source: self.source,
+            resolved: self.resolved.map(transform),
+        }
+    }
+    pub fn transpose(self) -> Result<ConfigValue<T>, E> {
+        match self.resolved {
+            Ok(resolved) => Ok(ConfigValue {
+                source: self.source,
+                resolved,
+            }),
+            Err(e) => Err(e),
+        }
+    }
+}
+impl<T> ConfigValue<Option<T>> {
+    pub fn inner_map<Q>(
+        self,
+        transform: impl FnOnce(T) -> Q,
+    ) -> ConfigValue<Option<Q>> {
+        ConfigValue {
+            source: self.source,
+            resolved: self.resolved.map(transform),
+        }
+    }
+    pub fn or_else(self, f: impl FnOnce() -> ConfigValue<Option<T>>) -> Self {
+        if self.resolved.is_some() {
+            self
+        } else {
+            f()
+        }
+    }
+    pub fn ok_or_else<E>(
+        self,
+        error: impl FnOnce() -> E,
+    ) -> ConfigValue<Result<T, E>> {
+        match self.resolved {
+            Some(inner) => ConfigValue {
+                source: self.source,
+                resolved: Ok(inner),
+            },
+            None => ConfigValue {
+                source: self.source,
+                resolved: Err(error()),
+            },
+        }
+    }
+    pub fn unwrap_or_else(
+        self,
+        default: impl FnOnce() -> ConfigValue<T>,
+    ) -> ConfigValue<T> {
+        if let Some(resolved) = self.resolved {
+            ConfigValue {
+                source: self.source,
+                resolved,
+            }
+        } else {
+            default()
+        }
+    }
+}
+
+pub struct FileTable {
+    pub document: toml_edit::DocumentMut,
+    pub path: Arc<Path>,
+}
+impl FileTable {
+    pub fn new(path: Arc<Path>) -> Self {
+        Self {
+            document: toml_edit::DocumentMut::new(),
+            path,
+        }
+    }
+    pub fn load(out: &ConsoleOutput, path: &Arc<Path>) -> Result<Self, ()> {
+        let config_contents = match std::fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(e) => {
+                let _ = writeln!(
+                    out,
+                    "Could not read configuration file {}: {}",
+                    path.display(),
+                    e
+                );
+                return Err(());
+            }
+        };
+        let document = match config_contents.parse::<toml_edit::DocumentMut>() {
+            Ok(doc) => doc,
+            Err(e) => {
+                let _ = writeln!(
+                    out,
+                    "Could not parse file {} as TOML: {}",
+                    path.display(),
+                    e
+                );
+                return Err(());
+            }
+        };
+        Ok(Self {
+            document,
+            path: path.clone(),
+        })
+    }
+
+    pub fn get_key<T>(
+        &self,
+        config_key: &'static str,
+    ) -> ConfigValue<Option<Result<T, FileTableError>>>
+    where
+        T: DeserializeOwned,
+    {
+        const DELIMITER: char = '.';
+
+        let source = ConfigValueSource::TomlFile {
+            path: self.path.clone(),
+            key: config_key,
+        };
+        let mut current_table: &dyn toml_edit::TableLike =
+            self.document.as_table();
+        let key = if let Some((table_prefix, final_key)) =
+            config_key.rsplit_once(DELIMITER)
+        {
+            for (idx, part) in table_prefix.split(DELIMITER).enumerate() {
+                let Some(table) = current_table.get(part) else {
+                    return ConfigValue {
+                        source,
+                        resolved: None,
+                    };
+                };
+                let Some(table) = table.as_table_like() else {
+                    return ConfigValue {
+                        source,
+                        resolved: Some(Err(FileTableError::ExpectedTable {
+                            key: config_key,
+                            table: idx,
+                        })),
+                    };
+                };
+                current_table = table;
+            }
+            final_key
+        } else {
+            config_key
+        };
+
+        let Some(value) = current_table.get(key) else {
+            return ConfigValue {
+                source,
+                resolved: None,
+            };
+        };
+
+        ConfigValue {
+            source,
+            resolved: match value.clone().into_value() {
+                Ok(value) => Some(
+                    T::deserialize(value.into_deserializer())
+                        .map_err(FileTableError::Deserialize),
+                ),
+                Err(_) => None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum FileTableError {
+    #[error("expected {key}'s {table}th key to be a table")]
+    ExpectedTable { key: &'static str, table: usize },
+    #[error("could not deserialize: {0}")]
+    Deserialize(toml_edit::de::Error),
+}
+
 #[derive(Clone, Debug)]
 pub enum ConfigValueSource {
     Builtin,
     Environment(&'static str),
-    File(Arc<Path>),
+    TomlFile { path: Arc<Path>, key: &'static str },
 }
 impl fmt::Display for ConfigValueSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -130,8 +411,8 @@ impl fmt::Display for ConfigValueSource {
             Self::Builtin => {
                 write!(f, "builtin default")
             }
-            Self::File(file) => {
-                write!(f, "file \"{}\"", file.display())
+            Self::TomlFile { path, key } => {
+                write!(f, "key \"{}\" in file \"{}\"", key, path.display())
             }
             Self::Environment(variable) => {
                 write!(f, "environment variable `{}`", variable)
