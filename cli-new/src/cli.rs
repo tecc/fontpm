@@ -1,5 +1,6 @@
 mod config;
 mod list;
+mod refresh;
 
 use clap::{Parser, Subcommand};
 use console::style;
@@ -19,13 +20,15 @@ pub struct CliArgs {
 #[derive(Subcommand)]
 pub enum CliCommand {
     Config(config::ConfigArgs),
+    Refresh(refresh::RefreshArgs),
 }
 
 pub fn run() {
     let args = CliArgs::parse();
 
     match args.command {
-        CliCommand::Config(config) => config::run(config),
+        CliCommand::Config(args) => config::run(args),
+        CliCommand::Refresh(args) => refresh::run(args),
     }
 }
 
