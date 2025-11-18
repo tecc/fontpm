@@ -8,9 +8,8 @@
 //!
 //! Default location: `{config_dir}/fontpm.toml`
 
-use crate::output::ConsoleOutput;
+use crate::cli::CliContext;
 use serde::de::{DeserializeOwned, IntoDeserializer};
-use serde::Deserialize;
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -78,22 +77,54 @@ macro_rules! config {
     };
 }
 
+const DEFAULT_CONFIGURATION: &'static str = include_str!("../fontpm.toml");
+
 impl Config {
-    pub fn load(out: &ConsoleOutput) -> Result<Self, ()> {
+    pub fn load(cli: &CliContext) -> Result<Self, ()> {
         let paths = ConfigPaths::load();
 
         let fontpm_toml = if paths.fontpm_config_file.resolved.exists() {
-            FileTable::load(out, &paths.fontpm_config_file.resolved)?
+            FileTable::load_file(cli, &paths.fontpm_config_file.resolved)?
         } else {
+            if !cli.modify_files {
+                let _ = writeln!(
+                    cli.warn(),
+                    "The configuration file does not exist, but none will be created"
+                );
+            } else {
+                let _ = writeln!(
+                    cli.warn(),
+                    "The configuration file does not exist, so a default will be written to it"
+                );
+                if let Err(e) = crate::util::create_parent_all(
+                    &paths.fontpm_config_file.resolved,
+                ) {
+                    let _ = writeln!(
+                        cli.warn(),
+                        "Could not create parent for default configuration: {}",
+                        e
+                    );
+                } else if let Err(e) = std::fs::write(
+                    &paths.fontpm_config_file.resolved,
+                    DEFAULT_CONFIGURATION,
+                ) {
+                    let _ = writeln!(
+                        cli.warn(),
+                        "Could not write default configuration: {}",
+                        e
+                    );
+                }
+            }
+
             FileTable::new(paths.fontpm_config_file.resolved.clone())
         };
 
-        let fontpm = FontpmConfig::load(out, &fontpm_toml)?;
+        let fontpm = FontpmConfig::load(cli, &fontpm_toml)?;
 
         Ok(Self {
             paths,
             fontpm_toml,
-            fontpm
+            fontpm,
         })
     }
 }
@@ -108,7 +139,7 @@ pub struct FontpmConfig {
     pub store_dir: ConfigValue<Arc<Path>>,
 }
 impl FontpmConfig {
-    pub fn load(out: &ConsoleOutput, fontpm_toml: &FileTable) -> Result<Self, ()> {
+    pub fn load(out: &CliContext, fontpm_toml: &FileTable) -> Result<Self, ()> {
         let store_dir = match config!(
             env("FONTPM_STORE_DIR", |x| x.map(Ok)),
             toml(fontpm_toml, "fontpm.store_dir"),
@@ -116,7 +147,7 @@ impl FontpmConfig {
                 .expect("cache_dir must exist")
                 .join("fontpm/store")))
         )
-            .transpose()
+        .transpose()
         {
             Ok(x) => x.map(to_arc_path),
             Err(e) => {
@@ -299,12 +330,12 @@ impl FileTable {
             path,
         }
     }
-    pub fn load(out: &ConsoleOutput, path: &Arc<Path>) -> Result<Self, ()> {
+    pub fn load_file(cli: &CliContext, path: &Arc<Path>) -> Result<Self, ()> {
         let config_contents = match std::fs::read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) => {
                 let _ = writeln!(
-                    out,
+                    cli,
                     "Could not read configuration file {}: {}",
                     path.display(),
                     e
@@ -312,11 +343,18 @@ impl FileTable {
                 return Err(());
             }
         };
-        let document = match config_contents.parse::<toml_edit::DocumentMut>() {
+        Self::load_str(cli, path, &config_contents)
+    }
+    pub fn load_str(
+        cli: &CliContext,
+        path: &Arc<Path>,
+        content: &str,
+    ) -> Result<Self, ()> {
+        let document = match content.parse::<toml_edit::DocumentMut>() {
             Ok(doc) => doc,
             Err(e) => {
                 let _ = writeln!(
-                    out,
+                    cli,
                     "Could not parse file {} as TOML: {}",
                     path.display(),
                     e
@@ -418,5 +456,24 @@ impl fmt::Display for ConfigValueSource {
                 write!(f, "environment variable `{}`", variable)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ensure that the default configuration is a valid configuration.
+    #[test]
+    fn default_config_loads() {
+        let context = CliContext::mock();
+        let table = FileTable::load_str(
+            &context,
+            &PathBuf::new().into(),
+            DEFAULT_CONFIGURATION,
+        )
+        .expect("Default configuration cannot be loaded as FileTable");
+        FontpmConfig::load(&context, &table)
+            .expect("FontpmConfig could not be loaded");
     }
 }
