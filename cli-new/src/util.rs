@@ -1,3 +1,6 @@
+mod keyed;
+pub mod store;
+
 use std::io;
 use std::path::Path;
 

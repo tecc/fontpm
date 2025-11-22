@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate async_trait;
+extern crate core;
 
 mod cli;
 mod config;
