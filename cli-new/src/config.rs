@@ -122,19 +122,19 @@ impl Config {
         } else {
             if !cli.modify_files {
                 let _ = writeln!(
-                    cli.warn(),
+                    cli.warn_v(),
                     "The configuration file does not exist, but none will be created"
                 );
             } else {
                 let _ = writeln!(
-                    cli.warn(),
+                    cli.warn_v(),
                     "The configuration file does not exist, so a default will be written to it"
                 );
                 if let Err(e) = crate::util::create_parent_all(
                     &paths.fontpm_config_file.resolved,
                 ) {
                     let _ = writeln!(
-                        cli.warn(),
+                        cli.warn_v(),
                         "Could not create parent for default configuration: {}",
                         e
                     );
@@ -143,7 +143,7 @@ impl Config {
                     DEFAULT_CONFIGURATION,
                 ) {
                     let _ = writeln!(
-                        cli.warn(),
+                        cli.warn_v(),
                         "Could not write default configuration: {}",
                         e
                     );
@@ -180,7 +180,7 @@ pub struct FontpmConfig {
     /// Sources:
     /// 1. Environment variable: `FONTPM_DOWNLOAD_TMP_DIR`
     /// 2. `fontpm.toml` key: `fontpm.download_tmp_dir`
-    /// 3. Default: `{store_dir}/cache`
+    /// 3. Default: `{store_dir}/tmp`
     pub store_tmp_dir: ConfigValue<Arc<Path>>,
     /// Enabled sources (see [`crate::source`]).
     ///

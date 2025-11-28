@@ -52,7 +52,7 @@ impl ObjectStore {
                     }
                 } else {
                     let _ = writeln!(
-                        context.warn(),
+                        context.warn_v(),
                         "Object store index would be created but will not be"
                     );
                 }
@@ -80,13 +80,15 @@ impl ObjectStore {
         file_name: &str,
         write_file: bool,
         in_memory: bool,
+        mut update: impl FnMut(usize, Option<usize>),
     ) -> anyhow::Result<TmpDownload> {
         // TODO: Figure out the interaction between this and dry-run mode
         let mut digest = ObjectHashAlgorithm::new();
 
+        let expected_length = response.content_length().map(|a| a as usize);
+
         let mut memory: Option<Vec<u8>> = in_memory.then(|| {
-            response
-                .content_length()
+            expected_length
                 .map(|a| Vec::with_capacity(a as _))
                 .unwrap_or(vec![])
         });
@@ -96,9 +98,11 @@ impl ObjectStore {
             if !self.tmp_dir.exists() {
                 tokio::fs::create_dir_all(&self.tmp_dir).await?;
             }
-            let file = tokio::fs::File::create_new(&path).await?;
-            if let Some(len) = response.content_length() {
-                file.set_len(len).await?;
+            let file = tokio::fs::File::create(&path)
+                .await
+                .context("creating file")?;
+            if let Some(len) = expected_length {
+                file.set_len(len as u64).await?;
             }
 
             let file = file.into_std().await;
@@ -114,6 +118,7 @@ impl ObjectStore {
         };
 
         let mut stream = response.bytes_stream();
+        let mut total = 0;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             digest.update(&chunk);
@@ -123,6 +128,8 @@ impl ObjectStore {
             if let Some((_path, file)) = &mut file {
                 file.write_all(chunk.as_ref()).await?;
             }
+            total += chunk.len();
+            update(total, expected_length)
         }
 
         if let Some((_path, file)) = &mut file {
@@ -190,7 +197,7 @@ impl TmpDownload {
         cli: &CliContext,
     ) -> anyhow::Result<()> {
         if let Some((source_path, mut source_file)) = self.file {
-            if let Some(parent) = source_path.parent() {
+            if let Some(parent) = target_path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
             match tokio::fs::rename(&source_path, target_path).await {
@@ -208,7 +215,7 @@ impl TmpDownload {
                     io::ErrorKind::AlreadyExists => {
                         let _ = writeln!(cli.warn_v(), "Attempting to move file {} to {} but the file already exists; ignoring", source_path.display(), target_path.display());
                     }
-                    _ => return Err(err).context("moving file"),
+                    _ => return Err(err).context("moving file failed"),
                 },
             }
         }

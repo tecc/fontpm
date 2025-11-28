@@ -4,18 +4,49 @@ use crate::cli::CliContext;
 use crate::config::{config, util, util::os_to_url, Config, ConfigValue};
 use crate::source::{Refreshed, Source, SourceContext, SourceId};
 use crate::util::store::ObjectId;
+use indicatif::{MultiProgress, ProgressBar};
 use reqwest::Url;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Google Fonts source.
+#[derive(Debug)]
 pub struct GoogleFonts {
     pub config: GoogleFontsConfig,
     pub data: GoogleFontsData,
 }
+impl GoogleFonts {
+    pub fn load(
+        cli: &CliContext,
+        main_config: &Config,
+    ) -> anyhow::Result<Self> {
+        let config = GoogleFontsConfig::load(cli, main_config)?;
+
+        let data = if config.data_file.resolved.exists() {
+            let data = std::fs::read_to_string(&config.data_file.resolved)?;
+            let data: GoogleFontsData = toml::de::from_str(&data)?;
+            data
+        } else {
+            // We don't write until we're doing clean-up
+            GoogleFontsData::default()
+        };
+
+        Ok(Self { config, data })
+    }
+
+    pub async fn write_data(&self) -> anyhow::Result<()> {
+        if let Some(parent) = self.config.data_file.resolved.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let value = toml::ser::to_string(&self.data)?;
+        tokio::fs::write(&self.config.data_file.resolved, value).await?;
+        Ok(())
+    }
+}
 
 /// Configuration for [`GoogleFonts`].
+#[derive(Debug)]
 pub struct GoogleFontsConfig {
     /// URL to a fresh index for this source.
     ///
@@ -29,21 +60,23 @@ pub struct GoogleFontsConfig {
     /// This file contains a single hash.
     ///
     /// Sources:
-    /// - Default: ``
+    /// - Default: `{store_dir}/google.toml`
     pub data_file: ConfigValue<Arc<Path>>,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GoogleFontsData {
     pub current_index: Option<CurrentIndex>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CurrentIndex {
     pub object: Arc<ObjectId>,
     pub commit: String,
 }
 
 pub const DEFAULT_FRESH_INDEX_URL: &str =
-    "https://raw.githubusercontent.com/fontpm/data/{tag}/google-fonts.json";
+    "https://raw.githubusercontent.com/fontpm/data/{ref}/google-fonts.json";
 // TODO: Remove dependency on GitHub API
 //       This could be done by including a timestamp in the index; if the
 //       timestamp is newer, the index is too.
@@ -61,7 +94,7 @@ impl GoogleFontsConfig {
             .map(util::to_arc_str);
         let data_file = config!(
             toml(config.fontpm_toml, "google.data_file"),
-            builtin(Ok(PathBuf::from("google.toml")))
+            builtin(Ok(config.fontpm.store_dir.resolved.join("google.toml")))
         )
         .fail(cli, "Google Fonts data file")?
         .map(util::to_arc_path);
@@ -81,12 +114,14 @@ impl Source for GoogleFonts {
 
     async fn refresh_index(
         &mut self,
-        context: Arc<SourceContext>,
+        context: &Arc<SourceContext>,
+        pb: &ProgressBar,
     ) -> anyhow::Result<Refreshed> {
+        pb.set_message("Checking for updates");
         // 1. Check if there's a new commit
         let response = context
             .http
-            .get(Url::parse(DEFAULT_FRESH_INDEX_URL)?)
+            .get(Url::parse(DEFAULT_COMMIT_DATA_URL)?)
             .send()
             .await?
             .error_for_status()?;
@@ -118,7 +153,13 @@ impl Source for GoogleFonts {
                 response,
                 "google-fonts-index",
                 context.cli.modify_files,
-                true,
+                false,
+                |current, total| {
+                    if let Some(len) = total {
+                        pb.set_length(len as u64)
+                    }
+                    pb.set_position(current as u64);
+                },
             )
             .await?;
 
@@ -146,12 +187,36 @@ impl Source for GoogleFonts {
             anyhow::bail!("could not index Google Fonts index: object could not be indexed but does not exist");
         };
 
+        let _ = writeln!(
+            context.cli.debug(),
+            "Google Fonts index updated to commit {}, object {}",
+            commit_data.commit.sha,
+            object.hash
+        );
+
         self.data.current_index = Some(CurrentIndex {
             object: object.hash.clone(),
             commit: commit_data.commit.sha,
         });
 
+        if context.cli.modify_files {
+            pb.set_message("Writing data");
+            self.write_data().await?;
+        } else {
+            let _ = writeln!(
+                context.cli.warn_v(),
+                "Google Fonts data would be written but will not be"
+            );
+        }
+
         Ok(Refreshed::Fresh)
+    }
+
+    async fn sync(&self, context: &Arc<SourceContext>) -> anyhow::Result<()> {
+        if !context.cli.modify_files {
+            return Ok(());
+        }
+        self.write_data().await
     }
 }
 

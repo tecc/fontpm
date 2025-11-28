@@ -11,13 +11,13 @@ use clap::{Args, Subcommand};
 use console::style;
 use std::io::Write;
 
-#[derive(Args)]
+#[derive(Debug, Args)]
 pub struct ConfigArgs {
     #[command(subcommand)]
     pub command: ConfigCommand,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
     Where,
 }

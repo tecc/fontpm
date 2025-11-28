@@ -20,20 +20,37 @@
 
 use crate::util::store::ObjectStore;
 use crate::{cli::CliContext, config::Config};
+use std::convert::identity;
+use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
 
 #[cfg(feature = "source-google-fonts")]
 pub mod google_fonts;
 
 #[async_trait]
-pub trait Source {
+pub trait Source: Send {
     /// Get the ID for this source.
     fn id(&self) -> &SourceId;
+
+    fn create_progress_bar(
+        &self,
+        mpb: &indicatif::MultiProgress,
+    ) -> indicatif::ProgressBar {
+        let pb = indicatif::ProgressBar::new_spinner()
+            .with_prefix(self.id().canonical_name().to_string());
+        mpb.add(pb)
+    }
+
     /// Refresh the local index.
     async fn refresh_index(
         &mut self,
-        context: Arc<SourceContext>,
+        context: &Arc<SourceContext>,
+        pb: &indicatif::ProgressBar,
     ) -> anyhow::Result<Refreshed>;
+    /// Ensure the consistency of the source.
+    /// This may involve writing internal files.
+    async fn sync(&self, context: &Arc<SourceContext>) -> anyhow::Result<()>;
 }
 
 /// More information about the result of refreshing the index.
@@ -45,6 +62,7 @@ pub enum Refreshed {
     Fresh,
 }
 
+#[derive(Clone)]
 pub struct SourceContext {
     pub cli: Arc<CliContext>,
     pub store: Arc<ObjectStore>,
@@ -64,13 +82,17 @@ impl SourceContext {
     }
 }
 
+#[derive(Debug)]
 pub struct Sources {
     #[cfg(feature = "source-google-fonts")]
     google_fonts: Option<google_fonts::GoogleFonts>,
 }
 impl Sources {
-    pub fn create_enabled(cli: &CliContext, config: &Config) {
-        let sources = Self { google_fonts: None };
+    pub fn create_enabled(
+        cli: &CliContext,
+        config: &Config,
+    ) -> anyhow::Result<Self> {
+        let mut sources = Self { google_fonts: None };
         for id in config.fontpm.enabled_sources.resolved.as_ref() {
             // NOTE(tecc): Keep feature-gating on the arm itself and not inside
             //             it; there's no point in having extra indentation.
@@ -84,7 +106,8 @@ impl Sources {
                         );
                         continue;
                     }
-                    todo!("Create Google Fonts source")
+                    let source = google_fonts::GoogleFonts::load(cli, config)?;
+                    sources.google_fonts = Some(source);
                 }
                 #[cfg(not(feature = "source-google-fonts"))]
                 SourceId::GoogleFonts => {
@@ -99,6 +122,17 @@ impl Sources {
                 }
             }
         }
+        Ok(sources)
+    }
+
+    /// Get an iterator over mutable references to every source.
+    pub fn iter_mut<'a>(
+        &'a mut self,
+    ) -> impl Iterator<Item = &'a mut dyn Source> {
+        std::iter::once(
+            self.google_fonts.as_mut().map(|a| a as &mut dyn Source),
+        )
+        .flatten()
     }
 }
 
@@ -212,6 +246,11 @@ macro_rules! source_id (
                 S: serde::ser::Serializer
             {
                 serializer.serialize_str(self.canonical_name())
+            }
+        }
+        impl fmt::Display for $typename {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str(self.canonical_name())
             }
         }
     }
