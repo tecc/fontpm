@@ -91,6 +91,17 @@ pub fn run(args: RefreshArgs) {
             }
         }
 
+        let mut exit_code = ExitCode::SUCCESS;
+
+        if let Err(e) = source_ctx.store.save(&cli_context).await {
+            let _ = writeln!(
+                source_ctx.cli.error(),
+                "Failed to save object store: {}",
+                e,
+            );
+            exit_code = ExitCode::FAILURE;
+        }
+
         let _ = mpb.clear();
         if errored > 0 {
             let _ = writeln!(

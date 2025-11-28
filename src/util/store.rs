@@ -74,6 +74,21 @@ impl ObjectStore {
         }))
     }
 
+    pub async fn save(&self, context: &CliContext) -> anyhow::Result<()> {
+        if !context.modify_files {
+            let _ = writeln!(
+                context.warn_v(),
+                "Object store index would be written but will not"
+            );
+            return Ok(());
+        }
+        let data = toml::to_string(&self.index).context("serialising")?;
+        tokio::fs::write(&self.index_file, &data)
+            .await
+            .context("writing")?;
+        Ok(())
+    }
+
     pub async fn download_to_tmp(
         &self,
         response: reqwest::Response,
