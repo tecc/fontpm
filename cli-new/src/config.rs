@@ -9,6 +9,8 @@
 //! Default location: `{config_dir}/fontpm.toml`
 
 use crate::cli::CliContext;
+use anyhow::Context;
+use reqwest::header::HeaderValue;
 use serde::de::{DeserializeOwned, IntoDeserializer};
 use std::ffi::OsString;
 use std::fmt;
@@ -25,72 +27,91 @@ macro_rules! config {
     () => {};
     (
         @ $x:ident
-        env($variable:literal $(, $map_fn:expr)?)
+        $fn_name:ident ( $($fn_args:tt)* )
         $(, $($remaining:tt)* )?
+    ) => {
+        config!(# $x $fn_name $($fn_args)* );
+        $(config!(@ $x $( $remaining )*);)?
+    };
+    (
+        # $x:ident
+        env
+        $variable:literal
+        $(, then: $and_then_fn:expr)?
     ) => {
         let $x = $x.or_else(|| {
             let env = ConfigValue::from_env_as($variable);
             $(
-            let env = env.map($map_fn);
+            let env = env.inner_map($and_then_fn);
             )?
             env
         });
-        $(config!(@ $x $( $remaining )*);)?
     };
     (
-        @ $x:ident
-        toml($file_table:expr, $key:literal $(, map_err: $map_err_fn:expr)?)
-        $(, $($remaining:tt)* )?
+        # $x:ident
+        toml
+        $file_table:expr,
+        $key:literal
+        $(, then: $and_then_fn:expr )?
     ) => {
         let $x = $x.or_else(|| {
             let file_table = &($file_table);
-            let value = file_table.get_key($key).inner_map(|e| e.map_err(anyhow::Error::from));
+            let value = file_table.get_key($key);
             $(
-                let value = value.inner_map_err($map_err_fn);
+                let value = {
+                    let f = $and_then_fn;
+                    let wrapped = |a| f(a).map_err(anyhow::Error::from);
+                    value.inner_map(|result| result.and_then(wrapped))
+                };
             )?
             value
         });
-        $(config!(@ $x $( $remaining )*);)?
     };
     (
-        @ $x:ident
-        builtin($value:expr)
-        $(, $($remaining:tt)* )?
+        # $x:ident
+        builtin
+        $value:expr
     ) => {
         let $x = $x.unwrap_or_else(|| ConfigValue::builtin($value));
-        $(config!(@ $x $( $remaining )*);)?
     };
     (
-        @ $x:ident
-        map($map_fn:expr)
-        $(, $($remaining:tt)* )?
+        # $x:ident
+        map
+        $map_fn:expr
     ) => {
         let $x = $x.map($map_fn);
-        $(config!(@ $x $( $remaining )*);)?
     };
     (
-        @ $x:ident
-        inner_map($($map_fn:expr),*)
-        $(, $($remaining:tt)* )?
+        # $x:ident
+        inner_map
+        $($map_fn:expr),*
     ) => {
         $( let $x = $x.inner_map($map_fn); )*
-        $(config!(@ $x $( $remaining )*);)?
     };
     (
         @ $x:ident
     ) => {};
     (
+        # $($remaining:tt)*
+    ) => {
+        compile_error!(concat!("Unexpected tokens: `", $(stringify!($remaining))*, "`"))
+    };
+    (
         $($token:tt)*
     ) => {
         {
+            use $crate::config::config;
             let value = ConfigValue::builtin(None);
             config!(@ value $($token)* );
             value
         }
     };
 }
+pub(crate) use config;
 
 const DEFAULT_CONFIGURATION: &'static str = include_str!("../fontpm.toml");
+const DEFAULT_HTTP_USER_AGENT: HeaderValue =
+    HeaderValue::from_static(concat!("fontpm/", env!("CARGO_PKG_VERSION")));
 
 impl Config {
     pub fn load(cli: &CliContext) -> anyhow::Result<Self> {
@@ -150,6 +171,17 @@ pub struct FontpmConfig {
     /// 2. `fontpm.toml` key: `fontpm.store_dir`
     /// 3. Default: `{dirs::cache_dir()}/fontpm/store`
     pub store_dir: ConfigValue<Arc<Path>>,
+    /// Path to a directory that FontPM should use for storing downloads
+    /// temporarily, before moving them to the object store.
+    ///
+    /// This is located in the same directory as the store in case the store
+    /// directory and temporary directory are located on different filesystems.
+    ///
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_DOWNLOAD_TMP_DIR`
+    /// 2. `fontpm.toml` key: `fontpm.download_tmp_dir`
+    /// 3. Default: `{store_dir}/cache`
+    pub store_tmp_dir: ConfigValue<Arc<Path>>,
     /// Enabled sources (see [`crate::source`]).
     ///
     /// Sources:
@@ -157,6 +189,16 @@ pub struct FontpmConfig {
     /// 2. `fontpm.toml` key: `fontpm.enabled_sources`
     /// 3. Default: Google Fonts, if available.
     pub enabled_sources: ConfigValue<Arc<[crate::source::SourceId]>>,
+    pub http: FontpmHttpConfig,
+}
+pub struct FontpmHttpConfig {
+    /// User agent to use in HTTP requests.
+    ///
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_HTTP_USER_AGENT`
+    /// 2. `fontpm.toml` key: `fontpm.user_agent`
+    /// 3. Default: `fontpm/{CARGO_PKG_VERSION}`.
+    pub user_agent: ConfigValue<HeaderValue>,
 }
 impl FontpmConfig {
     pub fn load(
@@ -164,51 +206,95 @@ impl FontpmConfig {
         fontpm_toml: &FileTable,
     ) -> anyhow::Result<Self> {
         let store_dir = config!(
-            env("FONTPM_STORE_DIR"),
-            inner_map(Ok),
+            env("FONTPM_STORE_DIR", then: Ok),
             toml(fontpm_toml, "fontpm.store_dir"),
             builtin(Ok(dirs::cache_dir()
                 .expect("cache_dir must exist")
                 .join("fontpm/store"))),
         )
         .fail(ctx, "store directory")?
-        .map(to_arc_path);
+        .map(util::to_arc_path);
+
+        let download_tmp_dir = config!(
+            env("FONTPM_DOWNLOAD_TMP_DIR", then: Ok),
+            toml(fontpm_toml, "fontpm.download_tmp_dir"),
+            builtin(Ok(store_dir.resolved.join("tmp")))
+        )
+        .fail(ctx, "temporary directory for downloads")?
+        .map(util::to_arc_path);
 
         let enabled_sources = config!(
-            env("FONTPM_ENABLED_SOURCES"),
-            inner_map(comma_separated_list_fromstr),
+            env("FONTPM_ENABLED_SOURCES", then: util::comma_separated_list_fromstr),
             toml(fontpm_toml, "fontpm.enabled_sources"),
             builtin(Ok(Arc::from(crate::source::DEFAULT_ENABLED_SOURCES)))
         )
         .fail(ctx, "enabled sources")?;
+
+        let user_agent = config!(
+            env("FONTPM_HTTP_USER_AGENT", then: util::to_header_value),
+            inner_map(anyhow::Result::from),
+            toml(fontpm_toml, "fontpm.http.user_agent", then: |x: String| HeaderValue::try_from(x)),
+            builtin(Ok(DEFAULT_HTTP_USER_AGENT))
+        )
+        .fail(ctx, "HTTP user agent")?;
+
         Ok(Self {
             store_dir,
+            store_tmp_dir: download_tmp_dir,
             enabled_sources,
+            http: FontpmHttpConfig { user_agent },
         })
     }
 }
-fn comma_separated_list_fromstr<T>(input: OsString) -> anyhow::Result<Arc<[T]>>
-where
-    T: std::str::FromStr,
-    anyhow::Error: From<T::Err>,
-{
-    comma_separated_list(input, |a| T::from_str(a))
-}
-fn comma_separated_list<T, E>(
-    input: OsString,
-    mut f: impl FnMut(&str) -> Result<T, E>,
-) -> anyhow::Result<Arc<[T]>>
-where
-    anyhow::Error: From<E>,
-{
-    let mut vec = vec![];
-    let input = input.into_string().map_err(|e| {
-        anyhow::anyhow!("input string could not be converted to a Rust string")
-    })?;
-    for entry in input.split(',') {
-        vec.push(f(entry)?);
+
+/// Utilities for loading configuration values.
+pub mod util {
+    use super::*;
+
+    pub fn comma_separated_list_fromstr<T>(
+        input: OsString,
+    ) -> anyhow::Result<Arc<[T]>>
+    where
+        T: std::str::FromStr,
+        anyhow::Error: From<T::Err>,
+    {
+        comma_separated_list(input, |a| T::from_str(a))
     }
-    Ok(vec.into())
+    pub fn comma_separated_list<T, E>(
+        input: OsString,
+        mut f: impl FnMut(&str) -> Result<T, E>,
+    ) -> anyhow::Result<Arc<[T]>>
+    where
+        anyhow::Error: From<E>,
+    {
+        let mut vec = vec![];
+        let input = input.into_string().map_err(|e| {
+            anyhow::anyhow!(
+                "input string could not be converted to a Rust string"
+            )
+        })?;
+        for entry in input.split(',') {
+            vec.push(f(entry)?);
+        }
+        Ok(vec.into())
+    }
+    pub fn to_header_value(input: OsString) -> anyhow::Result<HeaderValue> {
+        HeaderValue::from_bytes(input.as_encoded_bytes())
+            .context("converting OsString to Hea")
+    }
+    pub fn os_to_url(input: OsString) -> anyhow::Result<reqwest::Url> {
+        let string = String::from_utf8(input.into_encoded_bytes())?;
+        Ok(string.parse()?)
+    }
+    pub fn os_to_string(input: OsString) -> String {
+        input.to_string_lossy().into_owned()
+    }
+    pub fn to_arc_str(value: String) -> Arc<str> {
+        Arc::from(value)
+    }
+    pub fn to_arc_path(path: PathBuf) -> Arc<Path> {
+        Arc::from(path)
+    }
 }
 
 pub struct ConfigPaths {
@@ -239,22 +325,18 @@ impl ConfigPaths {
                     .expect("preference_dir required")
                     .join("fontpm")
             ),
-            map(to_arc_path)
+            map(util::to_arc_path)
         );
         let fontpm_config_file = config!(
             env("FONTPM_CONFIG_FILE"),
             builtin(config_dir.resolved.join("fontpm.toml")),
-            map(to_arc_path)
+            map(util::to_arc_path)
         );
         Self {
             config_dir,
             fontpm_config_file,
         }
     }
-}
-
-fn to_arc_path(path: PathBuf) -> Arc<Path> {
-    Arc::from(path)
 }
 
 #[derive(Clone, Debug)]
@@ -444,7 +526,7 @@ impl FileTable {
     pub fn get_key<T>(
         &self,
         config_key: &'static str,
-    ) -> ConfigValue<Option<Result<T, FileTableError>>>
+    ) -> ConfigValue<Option<anyhow::Result<T>>>
     where
         T: for<'de> serde::Deserialize<'de>,
     {
@@ -472,7 +554,8 @@ impl FileTable {
                         resolved: Some(Err(FileTableError::ExpectedTable {
                             key: config_key,
                             table: idx,
-                        })),
+                        }
+                        .into())),
                     };
                 };
                 current_table = table;
@@ -494,7 +577,7 @@ impl FileTable {
             resolved: match value.clone().into_value() {
                 Ok(value) => Some(
                     T::deserialize(value.into_deserializer())
-                        .map_err(FileTableError::Deserialize),
+                        .context("failed to deserialize"),
                 ),
                 Err(_) => None,
             },

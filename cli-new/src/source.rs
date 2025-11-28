@@ -18,11 +18,12 @@
 //! support doing so within the CLI itself, instead of relying on outside
 //! programs to.
 
+use crate::util::store::ObjectStore;
 use crate::{cli::CliContext, config::Config};
 use std::sync::Arc;
 
 #[cfg(feature = "source-google-fonts")]
-mod google_fonts;
+pub mod google_fonts;
 
 #[async_trait]
 pub trait Source {
@@ -30,7 +31,8 @@ pub trait Source {
     fn id(&self) -> &SourceId;
     /// Refresh the local index.
     async fn refresh_index(
-        context: Arc<CliContext>,
+        &mut self,
+        context: Arc<SourceContext>,
     ) -> anyhow::Result<Refreshed>;
 }
 
@@ -41,6 +43,25 @@ pub enum Refreshed {
     AlreadyUpToDate,
     /// The local index has been replaced with a fresher index
     Fresh,
+}
+
+pub struct SourceContext {
+    pub cli: Arc<CliContext>,
+    pub store: Arc<ObjectStore>,
+    pub http: reqwest::Client,
+}
+impl SourceContext {
+    pub fn new(cli: Arc<CliContext>, config: &Config) -> anyhow::Result<Self> {
+        let store = ObjectStore::load(&cli, &config)?;
+
+        Ok(Self {
+            cli,
+            store,
+            http: reqwest::Client::builder()
+                .user_agent(config.fontpm.http.user_agent.resolved.clone())
+                .build()?,
+        })
+    }
 }
 
 pub struct Sources {
@@ -59,7 +80,7 @@ impl Sources {
                     if sources.google_fonts.is_some() {
                         let _ = writeln!(
                             cli.warn(),
-                            "The Google Fonts source is alread"
+                            "The Google Fonts source has already been registered"
                         );
                         continue;
                     }

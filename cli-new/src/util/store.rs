@@ -5,29 +5,39 @@
 //! TODO: See if it can be used as an HTTP cache.
 
 use crate::cli::CliContext;
+use crate::config::Config;
 use crate::util::keyed::Keyed;
 use anyhow::Context;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use dashmap::DashMap;
+use futures_util::StreamExt;
 use relative_path::RelativePath;
 use serde::{de, ser};
-use std::path::Path;
+use sha2::digest::FixedOutput;
+use sha2::Digest;
+use std::borrow::Borrow;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, marker};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 pub struct ObjectStore {
     pub base_path: Arc<Path>,
     pub index_file: Arc<Path>,
+    pub tmp_dir: Arc<Path>,
     /// The current working index.
     index: ObjectStoreIndex,
 }
 impl ObjectStore {
     pub fn load(
         context: &CliContext,
-        base_path: Arc<Path>,
+        config: &Config,
     ) -> anyhow::Result<Arc<Self>> {
+        let base_path = config.fontpm.store_dir.resolved.clone();
         let index_file: Arc<Path> = base_path.join("index").into();
+        let tmp_dir = config.fontpm.store_tmp_dir.resolved.clone();
         if !base_path.exists() && context.modify_files {
             let _ = std::fs::create_dir_all(&base_path)?;
         }
@@ -64,12 +74,80 @@ impl ObjectStore {
         }))
     }
 
+    pub async fn download_to_tmp(
+        &self,
+        response: reqwest::Response,
+        file_name: &str,
+        write_file: bool,
+        in_memory: bool,
+    ) -> anyhow::Result<TmpDownload> {
+        // TODO: Figure out the interaction between this and dry-run mode
+        let mut digest = ObjectHashAlgorithm::new();
+
+        let mut memory: Option<Vec<u8>> = in_memory.then(|| {
+            response
+                .content_length()
+                .map(|a| Vec::with_capacity(a as _))
+                .unwrap_or(vec![])
+        });
+
+        let mut file = if write_file {
+            let path = self.tmp_dir.join(file_name);
+            if !self.tmp_dir.exists() {
+                tokio::fs::create_dir_all(&self.tmp_dir).await?;
+            }
+            let file = tokio::fs::File::create_new(&path).await?;
+            if let Some(len) = response.content_length() {
+                file.set_len(len).await?;
+            }
+
+            let file = file.into_std().await;
+            let file = tokio::task::spawn_blocking(|| {
+                file.try_lock().map(|_| tokio::fs::File::from_std(file))
+            })
+            .await
+            .context("spawning task")?
+            .context("locking file")?;
+            Some((path, file))
+        } else {
+            None
+        };
+
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            digest.update(&chunk);
+            if let Some(memory) = &mut memory {
+                memory.extend_from_slice(chunk.as_ref());
+            }
+            if let Some((_path, file)) = &mut file {
+                file.write_all(chunk.as_ref()).await?;
+            }
+        }
+
+        if let Some((_path, file)) = &mut file {
+            file.flush().await?;
+        }
+
+        Ok(TmpDownload {
+            hash: digest.finalize_fixed(),
+            content: memory,
+            file,
+        })
+    }
+
     /// Get an already indexed object.
     ///
     /// Returns `Some(object)` if an object with the hash `hash` exists.
     /// Returns `None` otherwise.
-    pub fn get_object(&self, hash: &ObjectHash) -> Option<Arc<Object>> {
-        self.index.objects.get(hash).map(|a| a.value().clone())
+    pub fn get_object(
+        &self,
+        hash: impl AsRef<ObjectHashOutput>,
+    ) -> Option<Arc<Object>> {
+        self.index
+            .objects
+            .get(ObjectId::from_ref(hash.as_ref()))
+            .map(|a| a.value().clone())
     }
     /// Adds an object to the index.
     ///
@@ -78,13 +156,13 @@ impl ObjectStore {
     ///
     /// Returns `None` if the object was already indexed.
     /// Returns `Some(object)` if the object was added to the index.
-    pub fn index_object(&self, hash: ObjectHash) -> Option<Arc<Object>> {
-        if self.index.objects.contains_key(&hash) {
+    pub fn index_object(&self, hash: ObjectHashOutput) -> Option<Arc<Object>> {
+        if self.index.objects.contains_key(&ObjectId(hash)) {
             return None;
         }
-        let hash = Arc::new(hash);
+        let hash = Arc::new(ObjectId(hash));
 
-        let hash_encoded = URL_SAFE_NO_PAD.encode(hash.as_ref());
+        let hash_encoded = URL_SAFE_NO_PAD.encode(hash.0);
         // The path to the object becomes the first two characters as a
         // parent to a file with the name of the hash as encoded.
         let path = RelativePath::new(&hash_encoded[0..2]).join(&hash_encoded);
@@ -99,23 +177,63 @@ impl ObjectStore {
     }
 }
 
-fn remove_newline(content: &'_ [u8]) -> Option<&'_ [u8]> {
-    let mut newline = false;
-    for (i, byte) in content.iter().copied().enumerate() {
-        if !byte.is_ascii_whitespace() {
-            return newline.then_some(&content[i..]);
+#[must_use]
+pub struct TmpDownload {
+    pub hash: ObjectHashOutput,
+    pub content: Option<Vec<u8>>,
+    pub file: Option<(PathBuf, tokio::fs::File)>,
+}
+impl TmpDownload {
+    pub async fn move_to(
+        self,
+        target_path: &Path,
+        cli: &CliContext,
+    ) -> anyhow::Result<()> {
+        if let Some((source_path, mut source_file)) = self.file {
+            if let Some(parent) = source_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            match tokio::fs::rename(&source_path, target_path).await {
+                Ok(_) => {}
+                Err(err) => match err.kind() {
+                    io::ErrorKind::CrossesDevices => {
+                        source_file.seek(io::SeekFrom::Start(0)).await?;
+                        let mut target_file =
+                            tokio::fs::File::create(target_path).await?;
+                        tokio::io::copy(&mut source_file, &mut target_file)
+                            .await?;
+                        drop(source_file);
+                        tokio::fs::remove_file(&source_path).await?;
+                    }
+                    io::ErrorKind::AlreadyExists => {
+                        let _ = writeln!(cli.warn_v(), "Attempting to move file {} to {} but the file already exists; ignoring", source_path.display(), target_path.display());
+                    }
+                    _ => return Err(err).context("moving file"),
+                },
+            }
         }
-        if byte == b'\n' {
-            newline = true;
+
+        Ok(())
+    }
+    pub async fn discard(self, cli: &CliContext) {
+        if let Some((path, file)) = self.file {
+            drop(file);
+            if let Err(e) = tokio::fs::remove_file(&path).await {
+                let _ = writeln!(
+                    cli.warn(),
+                    "Could not delete temporary file {}: {}",
+                    path.display(),
+                    e
+                );
+            }
         }
     }
-    newline.then_some(&content[content.len()..])
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ObjectStoreIndex {
     #[serde(rename = "object", with = "crate::util::keyed::AsKeyedValues")]
-    objects: DashMap<Arc<ObjectHash>, Arc<Object>>,
+    objects: DashMap<Arc<ObjectId>, Arc<Object>>,
 }
 
 impl ObjectStoreIndex {
@@ -129,13 +247,12 @@ impl ObjectStoreIndex {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Object {
     /// A hash of the object's contents.
-    #[serde(with = "AsBase64::<Arc<ObjectHash>>")]
-    pub hash: Arc<ObjectHash>,
+    pub hash: Arc<ObjectId>,
     pub path: Arc<RelativePath>,
 }
 
-impl Keyed<Arc<ObjectHash>> for Object {
-    fn key(&self) -> Arc<ObjectHash> {
+impl Keyed<Arc<ObjectId>> for Object {
+    fn key(&self) -> Arc<ObjectId> {
         self.hash.clone()
     }
 }
@@ -146,31 +263,90 @@ impl Keyed<Arc<ObjectHash>> for Object {
 ///       The primary criteria are speed and size; the faster it is the better,
 ///       but it can't be too big either.
 pub type ObjectHashAlgorithm = sha2::Sha256;
-pub type ObjectHash = sha2::digest::Output<ObjectHashAlgorithm>;
 
-struct AsBase64<T>(marker::PhantomData<T>);
-impl<T> AsBase64<Arc<T>> {
-    pub fn serialize<S>(
-        value: &Arc<T>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
+#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct ObjectId(ObjectHashOutput);
+impl ObjectId {
+    pub fn from_ref(output: &ObjectHashOutput) -> &ObjectId {
+        unsafe { std::mem::transmute(output) }
+    }
+}
+impl fmt::Display for ObjectId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // This is a needlessly large buffer but it'll work
+        let mut buf = [0u8; 128];
+        let size = URL_SAFE_NO_PAD
+            .encode_slice(self.0.as_slice(), &mut buf)
+            .map_err(|_| fmt::Error)?;
+        let data = unsafe { str::from_utf8_unchecked(&buf[0..size]) };
+        f.write_str(data)
+    }
+}
+impl From<ObjectHashOutput> for ObjectId {
+    fn from(value: ObjectHashOutput) -> Self {
+        Self(value)
+    }
+}
+impl<T> Borrow<T> for ObjectId
+where
+    ObjectHashOutput: Borrow<T>,
+{
+    fn borrow(&self) -> &T {
+        self.0.borrow()
+    }
+}
+impl<T> AsRef<T> for ObjectId
+where
+    ObjectHashOutput: AsRef<T>,
+{
+    fn as_ref(&self) -> &T {
+        self.0.as_ref()
+    }
+}
+
+impl ser::Serialize for ObjectId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        AsBase64::serialize(&self.0, serializer)
+    }
+}
+impl<'de> de::Deserialize<'de> for ObjectId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        AsBase64::deserialize(deserializer).map(Self)
+    }
+}
+
+pub type ObjectHashOutput = sha2::digest::Output<ObjectHashAlgorithm>;
+
+struct AsBase64;
+impl AsBase64 {
+    pub fn serialize<S, T>(value: T, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: ser::Serializer,
         T: AsRef<[u8]>,
     {
-        let value = URL_SAFE_NO_PAD.encode(value.as_ref());
+        let value = URL_SAFE_NO_PAD.encode(value);
         serializer.serialize_str(&value)
     }
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<Arc<ObjectHash>, D::Error>
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
     where
         D: de::Deserializer<'de>,
         for<'a> T: TryFrom<&'a [u8]>,
+        for<'a> <T as TryFrom<&'a [u8]>>::Error: fmt::Display,
     {
-        struct VisitorImpl;
-        impl<'de> de::Visitor<'de> for VisitorImpl {
-            type Value = ObjectHash;
+        struct VisitorImpl<T>(marker::PhantomData<T>);
+        impl<'de, T> de::Visitor<'de> for VisitorImpl<T>
+        where
+            for<'a> T: TryFrom<&'a [u8]>,
+            for<'a> <T as TryFrom<&'a [u8]>>::Error: fmt::Display,
+        {
+            type Value = T;
 
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 write!(f, "a base64 string")
@@ -182,10 +358,9 @@ impl<T> AsBase64<Arc<T>> {
                 let value = URL_SAFE_NO_PAD
                     .decode(v)
                     .map_err(<E as de::Error>::custom)?;
-                ObjectHash::try_from(value.as_slice())
-                    .map_err(<E as de::Error>::custom)
+                T::try_from(value.as_slice()).map_err(<E as de::Error>::custom)
             }
         }
-        deserializer.deserialize_str(VisitorImpl).map(Arc::new)
+        deserializer.deserialize_str(VisitorImpl(marker::PhantomData))
     }
 }

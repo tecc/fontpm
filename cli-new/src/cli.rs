@@ -42,12 +42,14 @@ pub struct CliContext {
     /// No operation that would modify a file is permitted. To what extent it
     /// can be done, simulate it.
     pub modify_files: bool,
+    pub verbose: bool,
 }
 impl CliContext {
     pub fn mock() -> Self {
         Self {
             term: console::Term::stdout(),
             modify_files: false,
+            verbose: false,
         }
     }
 
@@ -58,13 +60,18 @@ impl CliContext {
         PrefixedOutput {
             prefix: style("warn:").bold().yellow(),
             ctx: &self,
+            noop: false,
         }
+    }
+    pub fn warn_v(&'_ self) -> PrefixedOutput<'_> {
+        self.warn().with_noop(!self.verbose)
     }
 
     pub fn error(&'_ self) -> PrefixedOutput<'_> {
         PrefixedOutput {
             prefix: style("error:").bold().red(),
             ctx: &self,
+            noop: false,
         }
     }
 }
@@ -72,10 +79,15 @@ impl CliContext {
 pub struct PrefixedOutput<'a> {
     prefix: StyledObject<&'a str>,
     ctx: &'a CliContext,
+    noop: bool,
 }
 impl<'a> PrefixedOutput<'a> {
     pub fn write_fmt(&self, args: fmt::Arguments) -> io::Result<()> {
         write!(self.ctx, "{} {}", self.prefix, args)?;
         self.ctx.write_fmt(args)
+    }
+    fn with_noop(mut self, value: bool) -> Self {
+        self.noop = value;
+        self
     }
 }
