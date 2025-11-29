@@ -6,6 +6,7 @@ use crate::util::font::{FontSpec, ResolvedFont};
 use crate::util::store::ObjectStore;
 use anyhow::Context;
 use clap::{Args, ValueEnum};
+use console::style;
 use futures_util::TryFutureExt;
 use std::sync::Arc;
 
@@ -86,8 +87,6 @@ pub fn run(args: InstallArgs) {
 }
 fn _run(args: InstallArgs, cli: &Arc<CliContext>) -> anyhow::Result<()> {
     let scope = args.scope.resolve();
-
-    dbg!(scope);
 
     let config = Config::load(&cli).context("could not load config")?;
 
@@ -181,9 +180,9 @@ fn _run(args: InstallArgs, cli: &Arc<CliContext>) -> anyhow::Result<()> {
             .map(|(spec, resolutions)| {
                 // INVARIANT:
                 // At this point there must be at least one element in each vec
-                let resolution = if resolutions.len() == 1 {
+                let resolution = if resolutions.len() > 1 {
                     let resolution = dialoguer::Select::new()
-                        .with_prompt(format!("Select a resolution for {}", spec))
+                        .with_prompt(format!("Select a resolution for {}", style(&spec).yellow()))
                         .default(0)
                         .items(resolutions.iter().map(|res| res.to_string()))
                         .interact_on(&cli.term)

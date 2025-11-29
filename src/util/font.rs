@@ -58,6 +58,6 @@ pub struct ResolvedFont {
 }
 impl fmt::Display for ResolvedFont {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}:{}@{}", self.id, self.source, self.version)
+        write!(f, "{}:{}@{}", self.source, self.id, self.version)
     }
 }
