@@ -152,7 +152,7 @@ impl ObjectStore {
         }
 
         Ok(TmpDownload {
-            hash: digest.finalize_fixed(),
+            hash: ObjectId(digest.finalize_fixed()),
             content: memory,
             file,
         })
@@ -164,13 +164,21 @@ impl ObjectStore {
     /// Returns `None` otherwise.
     pub fn get_object(
         &self,
-        hash: impl AsRef<ObjectHashOutput>,
+        hash: impl AsRef<ObjectId>,
     ) -> Option<Arc<Object>> {
         self.index
             .objects
-            .get(ObjectId::from_ref(hash.as_ref()))
+            .get(hash.as_ref())
             .map(|a| a.value().clone())
     }
+    pub fn object_exists(&self, hash: impl AsRef<ObjectId>) -> bool {
+        self.index.objects.contains_key(hash.as_ref())
+    }
+
+    pub fn resolve_object_path(&self, relative: &RelativePath) -> PathBuf {
+        relative.to_path(&self.base_path)
+    }
+
     /// Adds an object to the index.
     ///
     /// This function does not create a file; it is the responsibility of the
@@ -178,11 +186,15 @@ impl ObjectStore {
     ///
     /// Returns `None` if the object was already indexed.
     /// Returns `Some(object)` if the object was added to the index.
-    pub fn index_object(&self, hash: ObjectHashOutput) -> Option<Arc<Object>> {
-        if self.index.objects.contains_key(&ObjectId(hash)) {
+    pub fn index_object(
+        &self,
+        hash: impl Into<ObjectId>,
+    ) -> Option<Arc<Object>> {
+        let hash = hash.into();
+        if self.index.objects.contains_key(&hash) {
             return None;
         }
-        let hash = Arc::new(ObjectId(hash));
+        let hash = Arc::new(hash);
 
         let hash_encoded = URL_SAFE_NO_PAD.encode(hash.0);
         // The path to the object becomes the first two characters as a
@@ -201,7 +213,7 @@ impl ObjectStore {
 
 #[must_use]
 pub struct TmpDownload {
-    pub hash: ObjectHashOutput,
+    pub hash: ObjectId,
     pub content: Option<Vec<u8>>,
     pub file: Option<(PathBuf, tokio::fs::File)>,
 }
@@ -318,11 +330,18 @@ where
         self.0.borrow()
     }
 }
-impl<T> AsRef<T> for ObjectId
-where
-    ObjectHashOutput: AsRef<T>,
-{
-    fn as_ref(&self) -> &T {
+impl AsRef<ObjectId> for ObjectId {
+    fn as_ref(&self) -> &ObjectId {
+        self
+    }
+}
+impl AsRef<ObjectHashOutput> for ObjectId {
+    fn as_ref(&self) -> &ObjectHashOutput {
+        &self.0
+    }
+}
+impl AsRef<[u8]> for ObjectId {
+    fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
@@ -332,35 +351,14 @@ impl ser::Serialize for ObjectId {
     where
         S: ser::Serializer,
     {
-        AsBase64::serialize(&self.0, serializer)
+        let value = URL_SAFE_NO_PAD.encode(self.0);
+        serializer.serialize_str(&value)
     }
 }
 impl<'de> de::Deserialize<'de> for ObjectId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: de::Deserializer<'de>,
-    {
-        AsBase64::deserialize(deserializer).map(Self)
-    }
-}
-
-pub type ObjectHashOutput = sha2::digest::Output<ObjectHashAlgorithm>;
-
-struct AsBase64;
-impl AsBase64 {
-    pub fn serialize<S, T>(value: T, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-        T: AsRef<[u8]>,
-    {
-        let value = URL_SAFE_NO_PAD.encode(value);
-        serializer.serialize_str(&value)
-    }
-    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-    where
-        D: de::Deserializer<'de>,
-        for<'a> T: TryFrom<&'a [u8]>,
-        for<'a> <T as TryFrom<&'a [u8]>>::Error: fmt::Display,
     {
         struct VisitorImpl<T>(marker::PhantomData<T>);
         impl<'de, T> de::Visitor<'de> for VisitorImpl<T>
@@ -383,6 +381,10 @@ impl AsBase64 {
                 T::try_from(value.as_slice()).map_err(<E as de::Error>::custom)
             }
         }
-        deserializer.deserialize_str(VisitorImpl(marker::PhantomData))
+        deserializer
+            .deserialize_str(VisitorImpl(marker::PhantomData))
+            .map(Self)
     }
 }
+
+pub type ObjectHashOutput = sha2::digest::Output<ObjectHashAlgorithm>;
