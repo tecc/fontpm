@@ -107,6 +107,8 @@ macro_rules! config {
         }
     };
 }
+use crate::platform;
+use crate::platform::InstallStrategy;
 pub(crate) use config;
 
 const DEFAULT_CONFIGURATION: &'static str = include_str!("../fontpm.toml");
@@ -190,6 +192,23 @@ pub struct FontpmConfig {
     /// 3. Default: Google Fonts, if available.
     pub enabled_sources: ConfigValue<Arc<[crate::source::SourceId]>>,
     pub http: FontpmHttpConfig,
+    /// Install strategies to use.
+    ///
+    /// This value does not merge with the default; the strategies specified
+    /// are the only ones used, and will be attempted in the order they are
+    /// specified.
+    ///
+    /// Prefer using scope-specific strategies, such as `global_strategy`,
+    /// `local_strategy`, or project-specific strategies.
+    ///
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_INSTALL_STRATEGY`
+    /// 2. `fontpm.toml` key: `fontpm.install_strategy`
+    /// 3. Default: Platform-specific value.
+    pub install_strategy: ConfigValue<Arc<[InstallStrategy]>>,
+    pub platform: FontpmPlatformConfig, // TODO: Scope-specific strategies
+                                        // pub global_strategy: ConfigValue<Arc<[InstallStrategy]>>,
+                                        // pub local_strategy: ConfigValue<Arc<[InstallStrategy]>>
 }
 pub struct FontpmHttpConfig {
     /// User agent to use in HTTP requests.
@@ -200,6 +219,35 @@ pub struct FontpmHttpConfig {
     /// 3. Default: `fontpm/{CARGO_PKG_VERSION}`.
     pub user_agent: ConfigValue<HeaderValue>,
 }
+
+pub struct FontpmPlatformConfig {
+    /// Directory to store global fonts in.
+    ///
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_GLOBAL_FONT_DIR`
+    /// 2. `fontpm.toml` key: `fontpm.platform.global_font_dir`
+    /// 3. Default: Platform-specific value.
+    ///
+    /// # Platform-specific
+    ///
+    /// ## Linux
+    ///
+    /// On Linux the default value is `/usr/share/fonts/fontpm`.
+    pub global_font_dir: ConfigValue<Arc<Path>>,
+    /// Directory to store local fonts in.
+    ///
+    /// Sources:
+    /// 1. Environment variable: `FONTPM_LOCAL_FONT_DIR`
+    /// 2. `fontpm.toml` key: `fontpm.platform.local_font_dir`
+    /// 3. Default: Platform-specific value.
+    ///
+    /// ## Linux
+    ///
+    /// On Linux the default value is based on their XDG prefix. Generally, the
+    /// full path equals `~/.local/share/fonts/fontpm`.
+    pub local_font_dir: ConfigValue<Arc<Path>>,
+}
+
 impl FontpmConfig {
     pub fn load(
         ctx: &CliContext,
@@ -228,7 +276,7 @@ impl FontpmConfig {
             toml(fontpm_toml, "fontpm.enabled_sources"),
             builtin(Ok(Arc::from(crate::source::DEFAULT_ENABLED_SOURCES)))
         )
-        .fail(ctx, "enabled sources")?;
+            .fail(ctx, "enabled sources")?;
 
         let user_agent = config!(
             env("FONTPM_HTTP_USER_AGENT", then: util::to_header_value),
@@ -236,13 +284,42 @@ impl FontpmConfig {
             toml(fontpm_toml, "fontpm.http.user_agent", then: |x: String| HeaderValue::try_from(x)),
             builtin(Ok(DEFAULT_HTTP_USER_AGENT))
         )
-        .fail(ctx, "HTTP user agent")?;
+            .fail(ctx, "HTTP user agent")?;
+
+        let install_strategy = config!(
+            env("FONTPM_INSTALL_STRATEGIES", then: util::comma_separated_list_fromstr),
+            inner_map(anyhow::Result::from),
+            toml(fontpm_toml, "fontpm.install_strategies"),
+            builtin(Ok(platform::DEFAULT_INSTALL_STRATEGIES.into()))
+        )
+            .fail(ctx, "default install strategy")?;
+
+        let global_font_dir = config!(
+            env("FONTPM_GLOBAL_FONT_DIR", then: Ok),
+            toml(fontpm_toml, "fontpm.platform.global_font_dir"),
+            builtin(platform::default_global_font_dir())
+        )
+        .fail(ctx, "global font install directory")?
+        .map(util::to_arc_path);
+
+        let local_font_dir = config!(
+            env("FONTPM_LOCAL_FONT_DIR", then: Ok),
+            toml(fontpm_toml, "fontpm.platform.local_font_dir"),
+            builtin(platform::default_local_font_dir())
+        )
+        .fail(ctx, "local font install directory")?
+        .map(util::to_arc_path);
 
         Ok(Self {
             store_dir,
             store_tmp_dir: download_tmp_dir,
             enabled_sources,
             http: FontpmHttpConfig { user_agent },
+            install_strategy,
+            platform: FontpmPlatformConfig {
+                global_font_dir,
+                local_font_dir,
+            },
         })
     }
 }

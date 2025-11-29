@@ -1,18 +1,26 @@
 mod config;
+mod install;
 mod list;
 mod refresh;
 
 use clap::{Args, Parser, Subcommand};
 use console::{style, StyledObject};
 use indicatif::{MultiProgress, ProgressDrawTarget};
+use std::process::ExitCode;
 use std::{fmt, io};
 
 /// FontPM, the font package manager.
 ///
 /// FontPM is a tool to manage fonts. Lorem ipsum dolores sit amet, put
 /// something else here later.
+///
+/// # Installation
+/// FontPM offers system-wide installation and user-local installation.
+///
+/// TODO: Project-local font management
 #[derive(Debug, Parser)]
 #[clap(name = "fontpm")]
+#[command(max_term_width = 80)]
 pub struct CliArgs {
     #[command(flatten)]
     pub global: GlobalOptions,
@@ -20,6 +28,9 @@ pub struct CliArgs {
     #[command(subcommand)]
     pub command: CliCommand,
 }
+/// Globally-available options.
+///
+/// To access these options in commands, add this struct as a field.
 #[derive(Debug, Args)]
 pub struct GlobalOptions {
     /// Simulate the changes without writing anything to disk.
@@ -32,16 +43,20 @@ pub struct GlobalOptions {
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     Config(config::ConfigArgs),
+    Install(install::InstallArgs),
     Refresh(refresh::RefreshArgs),
 }
 
-pub fn run() {
+pub fn run() -> ExitCode {
     let args = CliArgs::parse();
 
     match args.command {
         CliCommand::Config(args) => config::run(args),
-        CliCommand::Refresh(args) => refresh::run(args),
+        CliCommand::Install(args) => install::run(args),
+        CliCommand::Refresh(args) => return refresh::run(args),
     }
+    // TODO: Make other commands return ExitCode
+    ExitCode::SUCCESS
 }
 
 pub struct CliContext {

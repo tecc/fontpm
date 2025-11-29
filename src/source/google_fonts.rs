@@ -3,18 +3,24 @@
 use crate::cli::CliContext;
 use crate::config::{config, util, util::os_to_url, Config, ConfigValue};
 use crate::source::{Refreshed, Source, SourceContext, SourceId};
+use crate::util::font::{FontSpec, ResolvedFont};
 use crate::util::store::ObjectId;
+use anyhow::Context;
+use chrono::{DateTime, Utc};
 use indicatif::{MultiProgress, ProgressBar};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::OnceCell as AsyncOnceCell;
 
 /// Google Fonts source.
 #[derive(Debug)]
 pub struct GoogleFonts {
     pub config: GoogleFontsConfig,
     pub data: GoogleFontsData,
+    index: AsyncOnceCell<Index>,
 }
 impl GoogleFonts {
     pub fn load(
@@ -32,7 +38,11 @@ impl GoogleFonts {
             GoogleFontsData::default()
         };
 
-        Ok(Self { config, data })
+        Ok(Self {
+            config,
+            data,
+            index: AsyncOnceCell::new(),
+        })
     }
 
     pub async fn write_data(&self) -> anyhow::Result<()> {
@@ -128,7 +138,11 @@ impl Source for GoogleFonts {
         let commit_data = response.json::<GithubBranchData>().await?;
 
         let is_new = match &self.data.current_index {
-            Some(index) => index.commit != commit_data.commit.sha,
+            Some(index) => {
+                // If the object doesn't exist in the index we force a refresh
+                !context.store.object_exists(&index.object)
+                    || index.commit != commit_data.commit.sha
+            }
             None => true,
         };
 
@@ -212,19 +226,59 @@ impl Source for GoogleFonts {
         Ok(Refreshed::Fresh)
     }
 
-    async fn sync(&self, context: &Arc<SourceContext>) -> anyhow::Result<()> {
-        if !context.cli.modify_files {
-            return Ok(());
+    async fn resolve_font(
+        &self,
+        context: &Arc<SourceContext>,
+        font: &FontSpec,
+    ) -> anyhow::Result<Vec<ResolvedFont>> {
+        let Some(current_index) = &self.data.current_index else {
+            anyhow::bail!("no current index")
+        };
+        let index = self.index.get_or_try_init(|| async {
+            let Some(object) = context.store.get_object(&current_index.object) else {
+                anyhow::bail!("current index object {} does not exist, please refresh", &current_index.object)
+            };
+
+            let path = context.store.resolve_object_path(&object.path);
+            let data = tokio::fs::read(&path).await.context("reading index")?;
+            let index: Index = serde_json::from_slice(&data).context("parsing index")?;
+            Ok(index)
+        }).await?;
+        if let Some(family) = index.families.get(&font.id) {
+            Ok(vec![ResolvedFont {
+                id: family.id.to_string(),
+                source: self.id().clone(),
+                version: family.version.to_string(),
+                timestamp: family.last_modified,
+            }])
+        } else {
+            Ok(vec![])
         }
-        self.write_data().await
     }
 }
 
 #[derive(Deserialize)]
-pub struct GithubCommitData {
+struct GithubCommitData {
     pub sha: String,
 }
 #[derive(Deserialize)]
-pub struct GithubBranchData {
+struct GithubBranchData {
     pub commit: GithubCommitData,
+}
+#[derive(Clone, Debug, Deserialize)]
+struct Index {
+    families: HashMap<String, FontDescription>,
+    /// Map of tags to a list of families that have that tag
+    tags: HashMap<String, Vec<String>>,
+}
+#[derive(Clone, Debug, Deserialize)]
+struct FontDescription {
+    pub id: String,
+    pub display_name: String,
+    pub version: i32,
+    pub tags: Vec<String>,
+    #[serde(alias = "lastModified", with = "chrono::serde::ts_seconds")]
+    pub last_modified: DateTime<Utc>,
+    pub files: HashMap<String, String>,
+    pub variants: Vec<String>,
 }

@@ -18,6 +18,7 @@
 //! support doing so within the CLI itself, instead of relying on outside
 //! programs to.
 
+use crate::util::font::{FontSpec, ResolvedFont};
 use crate::util::store::ObjectStore;
 use crate::{cli::CliContext, config::Config};
 use std::convert::identity;
@@ -48,9 +49,23 @@ pub trait Source: Send {
         context: &Arc<SourceContext>,
         pb: &indicatif::ProgressBar,
     ) -> anyhow::Result<Refreshed>;
-    /// Ensure the consistency of the source.
-    /// This may involve writing internal files.
-    async fn sync(&self, context: &Arc<SourceContext>) -> anyhow::Result<()>;
+
+    /// Resolve a font spec to a list of matching fonts.
+    ///
+    /// # Return value
+    ///
+    /// If matching fonts were found, return a list of those matching fonts
+    /// `Ok(matching_fonts)`.
+    ///
+    /// If no matching fonts were found, return `Ok(vec![])`.
+    ///
+    /// If an unexpected error occurs whilst attempting to resolve the font
+    /// spec, return the `Err` variant.
+    async fn resolve_font(
+        &self,
+        context: &Arc<SourceContext>,
+        font: &FontSpec,
+    ) -> anyhow::Result<Vec<ResolvedFont>>;
 }
 
 /// More information about the result of refreshing the index.
@@ -125,6 +140,14 @@ impl Sources {
         Ok(sources)
     }
 
+    pub fn is_enabled(&self, id: &SourceId) -> bool {
+        self.iter().any(|source| source.id() == id)
+    }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a dyn Source> {
+        std::iter::once(self.google_fonts.as_ref().map(|a| a as &dyn Source))
+            .flatten()
+    }
     /// Get an iterator over mutable references to every source.
     pub fn iter_mut<'a>(
         &'a mut self,
