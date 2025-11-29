@@ -10,6 +10,7 @@ use crate::config::ConfigPaths;
 use clap::{Args, Subcommand};
 use console::style;
 use std::io::Write;
+use std::process::ExitCode;
 
 #[derive(Debug, Args)]
 pub struct ConfigArgs {
@@ -22,7 +23,7 @@ pub enum ConfigCommand {
     Where,
 }
 
-pub fn run(args: ConfigArgs) {
+pub fn run(args: ConfigArgs) -> ExitCode {
     match args.command {
         ConfigCommand::Where => {
             let mut console = console::Term::buffered_stdout();
@@ -40,6 +41,7 @@ pub fn run(args: ConfigArgs) {
                 paths.config_dir.source
             );
             let _ = console.flush();
+            ExitCode::SUCCESS
         }
     }
 }

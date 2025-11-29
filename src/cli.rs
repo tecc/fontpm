@@ -53,10 +53,8 @@ pub fn run() -> ExitCode {
     match args.command {
         CliCommand::Config(args) => config::run(args),
         CliCommand::Install(args) => install::run(args),
-        CliCommand::Refresh(args) => return refresh::run(args),
+        CliCommand::Refresh(args) => refresh::run(args),
     }
-    // TODO: Make other commands return ExitCode
-    ExitCode::SUCCESS
 }
 
 pub struct CliContext {

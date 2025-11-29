@@ -8,6 +8,7 @@ use anyhow::Context;
 use clap::{Args, ValueEnum};
 use console::style;
 use futures_util::TryFutureExt;
+use std::process::ExitCode;
 use std::sync::Arc;
 
 /// Install a font globally (available for all users) or locally (only for
@@ -75,23 +76,29 @@ pub enum Scope {
     Local,
 }
 
-pub fn run(args: InstallArgs) {
+pub fn run(args: InstallArgs) -> ExitCode {
     let cli = Arc::new(CliContext::new(&args.global));
-    match _run(args, &cli) {
-        Ok(_) => {}
-        Err(e) => {
-            let _ =
-                writeln!(cli.error(), "Error whilst installing fonts: {:?}", e);
-        }
-    }
-}
-fn _run(args: InstallArgs, cli: &Arc<CliContext>) -> anyhow::Result<()> {
     let scope = args.scope.resolve();
 
-    let config = Config::load(&cli).context("could not load config")?;
+    let config = match Config::load(&cli) {
+        Ok(x) => x,
+        Err(e) => {
+            let _ =
+                writeln!(cli.error(), "Could not load configuration: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
 
-    let sources =
-        Sources::create_enabled(&cli, &config).context("loading sources")?;
+    let sources = match Sources::create_enabled(&cli, &config)
+        .context("loading sources")
+    {
+        Ok(x) => x,
+        Err(e) => {
+            let _ =
+                writeln!(cli.error(), "Could not load configuration: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
 
     let mut ok = true;
     for spec in &args.fonts {
@@ -108,18 +115,31 @@ fn _run(args: InstallArgs, cli: &Arc<CliContext>) -> anyhow::Result<()> {
         }
     }
     if !ok {
-        anyhow::bail!("at least one font-spec is invalid");
+        let _ = writeln!(cli.error(), "At least one font spec is invalid (see previous messages for details)");
+        return ExitCode::FAILURE;
     }
 
-    let object_store = ObjectStore::load(cli, &config)
-        .context("failed to load object store")?;
+    let object_store = match ObjectStore::load(&cli, &config) {
+        Ok(x) => x,
+        Err(e) => {
+            let _ = writeln!(cli.error(), "Could not load object store: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
     let source_ctx = Arc::new(SourceContext {
         cli: cli.clone(),
         store: object_store,
         http: Default::default(),
     });
 
-    let runtime = create_runtime(&config).context("creating Tokio runtime")?;
+    let runtime = match create_runtime(&config) {
+        Ok(x) => x,
+        Err(e) => {
+            let _ =
+                writeln!(cli.error(), "Could not create Tokio runtime: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
     runtime.block_on(async {
         // 1. Get all possible resolutions for every single ID
 
@@ -145,9 +165,16 @@ fn _run(args: InstallArgs, cli: &Arc<CliContext>) -> anyhow::Result<()> {
             futures::future::try_join_all(resolve).await
         });
         let resolved_iter = futures::future::try_join_all(resolved)
-            .await?
-            .into_iter()
-            .flatten();
+            .await
+            .map(|vecs| vecs.into_iter()
+                .flatten());
+        let resolved_iter = match resolved_iter {
+            Ok(x) => x,
+            Err(e) => {
+                let _ = writeln!(cli.error(), "Could not resolve fonts: {}", e);
+                return ExitCode::FAILURE
+            }
+        };
 
         // Vec<(font spec, Vec<resolved values>)>
         let mut specs: Vec<_> = args
@@ -172,11 +199,11 @@ fn _run(args: InstallArgs, cli: &Arc<CliContext>) -> anyhow::Result<()> {
         }
         if errors > 0 {
             let _ = writeln!(cli.error(), "{} error(s) occurred (see above)", errors);
-            return Ok(())
+            return ExitCode::FAILURE
         }
 
         // 2. Select exactly one resolution for each spec
-        let specs: Vec<_> = specs.into_iter()
+        let specs = specs.into_iter()
             .map(|(spec, resolutions)| {
                 // INVARIANT:
                 // At this point there must be at least one element in each vec
@@ -193,16 +220,10 @@ fn _run(args: InstallArgs, cli: &Arc<CliContext>) -> anyhow::Result<()> {
                     resolutions.into_iter().next().expect("invariant broken: at least one resolution must exist for each spec")
                 };
                 (spec, resolution)
-            })
-            .collect();
+            });
 
-        dbg!(specs);
+        specs.for_each(|x| { dbg!(x); });
 
-        Ok(())
+        ExitCode::SUCCESS
     })
-}
-
-struct Resolved {
-    spec: FontSpec,
-    resolved: Vec<ResolvedFont>,
 }
