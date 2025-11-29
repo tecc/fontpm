@@ -21,9 +21,7 @@
 use crate::util::font::{FontSpec, ResolvedFont};
 use crate::util::store::ObjectStore;
 use crate::{cli::CliContext, config::Config};
-use std::convert::identity;
 use std::fmt;
-use std::future::Future;
 use std::sync::Arc;
 
 #[cfg(feature = "source-google-fonts")]

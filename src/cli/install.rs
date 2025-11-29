@@ -1,7 +1,6 @@
 use crate::cli::{CliContext, GlobalOptions};
 use crate::config::Config;
-use crate::source::{SourceContext, SourceId, Sources};
-use crate::util;
+use crate::source::{SourceContext, Sources};
 use crate::util::create_runtime;
 use crate::util::font::{FontSpec, ResolvedFont};
 use crate::util::store::ObjectStore;
@@ -92,7 +91,7 @@ fn _run(args: InstallArgs, cli: &Arc<CliContext>) -> anyhow::Result<()> {
 
     let config = Config::load(&cli).context("could not load config")?;
 
-    let mut sources =
+    let sources =
         Sources::create_enabled(&cli, &config).context("loading sources")?;
 
     let mut ok = true;

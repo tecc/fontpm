@@ -3,11 +3,8 @@ use crate::config::Config;
 use crate::source::{Refreshed, SourceContext, Sources};
 use crate::util::create_runtime;
 use clap::Args;
-use console::Term;
-use indicatif::{MultiProgress, ProgressDrawTarget, ProgressStyle};
 use std::process::ExitCode;
 use std::sync::Arc;
-use tokio::task::{JoinSet, LocalSet};
 
 /// Refresh the local index.
 #[derive(Debug, Args)]

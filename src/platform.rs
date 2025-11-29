@@ -31,12 +31,8 @@
 //! After installing a font (either globally or locally),
 
 use crate::util::font::ResolvedFont;
-use crate::util::store::ObjectId;
 use crate::util::string_enum;
-use anyhow::Context;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
 pub mod linux;

@@ -11,7 +11,7 @@
 use crate::cli::CliContext;
 use anyhow::Context;
 use reqwest::header::HeaderValue;
-use serde::de::{DeserializeOwned, IntoDeserializer};
+use serde::de::IntoDeserializer;
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};

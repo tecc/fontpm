@@ -1,18 +1,18 @@
 //! Google Fonts source.
 
 use crate::cli::CliContext;
-use crate::config::{config, util, util::os_to_url, Config, ConfigValue};
+use crate::config::{config, util, Config, ConfigValue};
 use crate::source::{Refreshed, Source, SourceContext, SourceId};
 use crate::util::font::{FontSpec, ResolvedFont};
 use crate::util::store::ObjectId;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::ProgressBar;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::OnceCell as AsyncOnceCell;
 
 /// Google Fonts source.
