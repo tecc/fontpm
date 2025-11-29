@@ -1,9 +1,11 @@
 use crate::cli::{CliContext, GlobalOptions};
 use crate::config::Config;
 use crate::source::{Refreshed, SourceContext, Sources};
+use crate::util::create_runtime;
 use clap::Args;
 use console::Term;
 use indicatif::{MultiProgress, ProgressDrawTarget, ProgressStyle};
+use std::process::ExitCode;
 use std::sync::Arc;
 use tokio::task::{JoinSet, LocalSet};
 
@@ -14,7 +16,7 @@ pub struct RefreshArgs {
     pub global: GlobalOptions,
 }
 
-pub fn run(args: RefreshArgs) {
+pub fn run(args: RefreshArgs) -> ExitCode {
     let mut cli_context = CliContext::new(&args.global);
     let config = match Config::load(&cli_context) {
         Ok(x) => x,
@@ -24,10 +26,9 @@ pub fn run(args: RefreshArgs) {
                 "Could not load configuration: {}",
                 e
             );
-            return;
+            return ExitCode::FAILURE;
         }
     };
-    dbg!(args);
 
     let mut sources = match Sources::create_enabled(&cli_context, &config) {
         Ok(x) => x,
@@ -37,14 +38,13 @@ pub fn run(args: RefreshArgs) {
                 "Could not create sources: {}",
                 e
             );
-            return;
+            return ExitCode::FAILURE;
         }
     };
     let mpb = cli_context.multiprogress();
     let cli_context = Arc::new(cli_context);
 
-    let source_context = match SourceContext::new(cli_context.clone(), &config)
-    {
+    let source_ctx = match SourceContext::new(cli_context.clone(), &config) {
         Ok(x) => x,
         Err(e) => {
             let _ = writeln!(
@@ -52,14 +52,11 @@ pub fn run(args: RefreshArgs) {
                 "Could not create source context: {}",
                 e
             );
-            return;
+            return ExitCode::FAILURE;
         }
     };
-    let source_ctx = Arc::new(source_context);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let source_ctx = Arc::new(source_ctx);
+    let runtime = create_runtime(&config).unwrap();
 
     runtime.block_on(async move {
         let iter = sources.iter_mut().map(|source| async {
@@ -109,6 +106,7 @@ pub fn run(args: RefreshArgs) {
                 "{} source(s) failed to refresh (see above for details)",
                 errored
             );
+            exit_code = ExitCode::FAILURE;
         }
         let _ = writeln!(
             source_ctx.cli.ok(),
@@ -116,5 +114,7 @@ pub fn run(args: RefreshArgs) {
             fresh,
             already_up_to_date
         );
-    });
+
+        exit_code
+    })
 }
