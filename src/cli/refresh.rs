@@ -1,7 +1,5 @@
-use crate::cli::{CliContext, GlobalOptions};
-use crate::config::Config;
-use crate::source::{Refreshed, SourceContext, Sources};
-use crate::util::create_runtime;
+use crate::cli::{tri_f, CliContext, GlobalOptions};
+use crate::source::Refreshed;
 use clap::Args;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -14,46 +12,15 @@ pub struct RefreshArgs {
 }
 
 pub fn run(args: RefreshArgs) -> ExitCode {
-    let mut cli_context = CliContext::new(&args.global);
-    let config = match Config::load(&cli_context) {
-        Ok(x) => x,
-        Err(e) => {
-            let _ = writeln!(
-                cli_context.error(),
-                "Could not load configuration: {}",
-                e
-            );
-            return ExitCode::FAILURE;
-        }
-    };
+    let mut cli = CliContext::new(&args.global);
+    let config = tri_f!(::load_config, &cli);
+    let mut sources = tri_f!(::create_sources, &cli, &config);
 
-    let mut sources = match Sources::create_enabled(&cli_context, &config) {
-        Ok(x) => x,
-        Err(e) => {
-            let _ = writeln!(
-                cli_context.error(),
-                "Could not create sources: {}",
-                e
-            );
-            return ExitCode::FAILURE;
-        }
-    };
-    let mpb = cli_context.multiprogress();
-    let cli_context = Arc::new(cli_context);
+    let mpb = cli.multiprogress();
+    let cli = Arc::new(cli);
 
-    let source_ctx = match SourceContext::new(cli_context.clone(), &config) {
-        Ok(x) => x,
-        Err(e) => {
-            let _ = writeln!(
-                cli_context.error(),
-                "Could not create source context: {}",
-                e
-            );
-            return ExitCode::FAILURE;
-        }
-    };
-    let source_ctx = Arc::new(source_ctx);
-    let runtime = create_runtime(&config).unwrap();
+    let source_ctx = tri_f!(::source_ctx, &cli, &config);
+    let runtime = tri_f!(::tokio, &cli, &config);
 
     runtime.block_on(async move {
         let iter = sources.iter_mut().map(|source| async {
@@ -87,7 +54,7 @@ pub fn run(args: RefreshArgs) -> ExitCode {
 
         let mut exit_code = ExitCode::SUCCESS;
 
-        if let Err(e) = source_ctx.store.save(&cli_context).await {
+        if let Err(e) = source_ctx.store.save(&cli).await {
             let _ = writeln!(
                 source_ctx.cli.error(),
                 "Failed to save object store: {}",

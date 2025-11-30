@@ -1,9 +1,5 @@
-use crate::cli::{CliContext, GlobalOptions};
-use crate::config::Config;
-use crate::source::{SourceContext, Sources};
-use crate::util::create_runtime;
-use crate::util::font::{FontSpec, ResolvedFont};
-use crate::util::store::ObjectStore;
+use crate::cli::{tri, tri_f, CliContext, GlobalOptions};
+use crate::util::font::FontSpec;
 use anyhow::Context;
 use clap::{Args, ValueEnum};
 use console::style;
@@ -80,25 +76,8 @@ pub fn run(args: InstallArgs) -> ExitCode {
     let cli = Arc::new(CliContext::new(&args.global));
     let scope = args.scope.resolve();
 
-    let config = match Config::load(&cli) {
-        Ok(x) => x,
-        Err(e) => {
-            let _ =
-                writeln!(cli.error(), "Could not load configuration: {}", e);
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let sources = match Sources::create_enabled(&cli, &config)
-        .context("loading sources")
-    {
-        Ok(x) => x,
-        Err(e) => {
-            let _ =
-                writeln!(cli.error(), "Could not load configuration: {}", e);
-            return ExitCode::FAILURE;
-        }
-    };
+    let config = tri_f!(::load_config, &cli);
+    let sources = tri_f!(::create_sources, &cli, &config);
 
     let mut ok = true;
     for spec in &args.fonts {
@@ -119,27 +98,8 @@ pub fn run(args: InstallArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let object_store = match ObjectStore::load(&cli, &config) {
-        Ok(x) => x,
-        Err(e) => {
-            let _ = writeln!(cli.error(), "Could not load object store: {}", e);
-            return ExitCode::FAILURE;
-        }
-    };
-    let source_ctx = Arc::new(SourceContext {
-        cli: cli.clone(),
-        store: object_store,
-        http: Default::default(),
-    });
-
-    let runtime = match create_runtime(&config) {
-        Ok(x) => x,
-        Err(e) => {
-            let _ =
-                writeln!(cli.error(), "Could not create Tokio runtime: {}", e);
-            return ExitCode::FAILURE;
-        }
-    };
+    let source_ctx = tri_f!(::source_ctx, &cli, &config);
+    let runtime = tri_f!(::tokio, &cli, &config);
     runtime.block_on(async {
         // 1. Get all possible resolutions for every single ID
 
@@ -168,13 +128,11 @@ pub fn run(args: InstallArgs) -> ExitCode {
             .await
             .map(|vecs| vecs.into_iter()
                 .flatten());
-        let resolved_iter = match resolved_iter {
-            Ok(x) => x,
-            Err(e) => {
-                let _ = writeln!(cli.error(), "Could not resolve fonts: {}", e);
-                return ExitCode::FAILURE
-            }
-        };
+        let resolved_iter = tri!(
+            resolved_iter,
+            cli.error(),
+            "Could not resolve fonts"
+        );
 
         // Vec<(font spec, Vec<resolved values>)>
         let mut specs: Vec<_> = args
@@ -193,13 +151,13 @@ pub fn run(args: InstallArgs) -> ExitCode {
             if resolved.is_empty() {
                 let _ = writeln!(cli.error(), "Font spec {} did not resolve to any fonts", spec);
                 errors += 1;
-                continue
+                continue;
             }
             resolved.sort();
         }
         if errors > 0 {
             let _ = writeln!(cli.error(), "{} error(s) occurred (see above)", errors);
-            return ExitCode::FAILURE
+            return ExitCode::FAILURE;
         }
 
         // 2. Select exactly one resolution for each spec

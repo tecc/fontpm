@@ -163,3 +163,65 @@ impl<'a> PrefixedOutput<'a> {
         self
     }
 }
+
+/// Unwraps `value` from `Ok(value)`, or prints an error message and returns an
+/// [`ExitCode`].
+macro_rules! tri {
+    ($expr:expr, $cli_out:expr, $fmt:literal $(, $fmt_args:expr)*) => {
+        {
+            match $expr {
+                Ok(value) => value,
+                Err(e) => {
+                    let _ = writeln!(
+                        $cli_out,
+                        "{}: {}",
+                        format_args!($fmt $($fmt_args)*),
+                        e
+                    );
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    };
+}
+/// Shorthand for common [`tri`] calls.
+macro_rules! tri_f {
+    (::load_config, $cli:expr) => {{
+        let cli: &$crate::cli::CliContext = $cli;
+        $crate::cli::tri!(
+            $crate::config::Config::load(cli),
+            cli.error(),
+            "Could not load configuration"
+        )
+    }};
+    (::create_sources, $cli:expr, $config:expr) => {{
+        let cli: &$crate::cli::CliContext = $cli;
+        let config: &$crate::config::Config = $config;
+        $crate::cli::tri!(
+            $crate::source::Sources::create_enabled(cli, config),
+            cli.error(),
+            "Could not load sources"
+        )
+    }};
+    (::source_ctx, $cli:expr, $config:expr) => {{
+        let cli: &Arc<$crate::cli::CliContext> = $cli;
+        let config: &$crate::config::Config = $config;
+        $crate::cli::tri!(
+            $crate::source::SourceContext::new(cli.clone(), config)
+                .map(Arc::new),
+            cli.error(),
+            "Could not create source context"
+        )
+    }};
+    (::tokio, $cli:expr, $config:expr) => {{
+        let cli: &$crate::cli::CliContext = $cli;
+        let config: &$crate::config::Config = $config;
+        $crate::cli::tri!(
+            $crate::util::create_runtime(config),
+            cli.error(),
+            "Could not create Tokio runtime"
+        )
+    }};
+}
+
+pub(crate) use {tri, tri_f};
