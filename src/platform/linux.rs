@@ -1,19 +1,32 @@
+use crate::cli::CliContext;
+use crate::config::Config;
 use crate::platform::InstallStrategy;
 use crate::util::font::ResolvedFont;
 use anyhow::Context;
 use relative_path::RelativePathBuf;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-pub struct Platform {}
+pub struct Platform {
+    global_dir: Arc<Path>,
+    local_dir: Arc<Path>,
+}
 
 impl super::PlatformImpl for Platform {
+    fn load(_cli: &CliContext, config: &Config) -> anyhow::Result<Self> {
+        Ok(Self {
+            global_dir: config.fontpm.platform.global_font_dir.resolved.clone(),
+            local_dir: config.fontpm.platform.local_font_dir.resolved.clone(),
+        })
+    }
+
     fn default_global_font_dir() -> anyhow::Result<PathBuf> {
         Ok("/usr/share/fonts/fontpm".into())
     }
     fn default_local_font_dir() -> anyhow::Result<PathBuf> {
         dirs::font_dir()
             .map(|path| path.join("fontpm"))
-            .context("no font directory could be gotten")
+            .context("no font directory available")
     }
 
     fn install_font_global(&mut self) {

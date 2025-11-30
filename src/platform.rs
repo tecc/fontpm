@@ -30,6 +30,8 @@
 //!
 //! After installing a font (either globally or locally),
 
+use crate::cli::CliContext;
+use crate::config::Config;
 use crate::util::font::ResolvedFont;
 use crate::util::string_enum;
 use std::path::PathBuf;
@@ -57,11 +59,24 @@ pub fn default_local_font_dir() -> anyhow::Result<PathBuf> {
     <imp::Platform as PlatformImpl>::default_local_font_dir()
 }
 
+pub struct Platform {
+    inner: imp::Platform,
+}
+impl Platform {
+    pub fn load(cli: &CliContext, config: &Config) -> anyhow::Result<Self> {
+        Ok(Self {
+            inner: imp::Platform::load(cli, config)?,
+        })
+    }
+}
+
 /// Platform-specific functionality required by FontPM.
 ///
 /// This should be implemented by platform-specific code and wrapped by a
 /// platform-agnostic layer.
-trait PlatformImpl {
+trait PlatformImpl: Sized {
+    fn load(cli: &CliContext, config: &Config) -> anyhow::Result<Self>;
+
     /// Default global (system-wide) font installation directory.
     fn default_global_font_dir() -> anyhow::Result<PathBuf>;
     /// Default local (user-specific) font installation directory.
