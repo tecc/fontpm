@@ -3,6 +3,7 @@ use crate::util::string_enum;
 use chrono::{DateTime, Utc};
 use relative_path::RelativePathBuf;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
@@ -85,8 +86,19 @@ pub enum FontFileKind {
 }
 
 string_enum!(
+    #[derive(Eq, PartialEq)]
     pub enum FontAxis {
         Weight = "wght",
         // TODO: Research well-known axes
     }
 );
+impl PartialOrd for FontAxis {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for FontAxis {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
