@@ -94,7 +94,7 @@ impl CliContext {
     pub fn multiprogress(&mut self) -> MultiProgress {
         let mpb = MultiProgress::with_draw_target(ProgressDrawTarget::term(
             self.term.clone(),
-            5,
+            20,
         ));
         self.mpb = Some(mpb.clone());
         mpb

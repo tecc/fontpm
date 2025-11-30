@@ -2,6 +2,7 @@ use crate::source::SourceId;
 use crate::util::string_enum;
 use chrono::{DateTime, Utc};
 use relative_path::RelativePathBuf;
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
@@ -72,6 +73,13 @@ impl fmt::Display for ResolvedFont {
 pub struct FontFile {
     pub name: RelativePathBuf,
     pub kind: FontFileKind,
+    pub download: Download,
+}
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
+pub enum Download {
+    Url(Url),
 }
 
 #[derive(

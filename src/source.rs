@@ -184,6 +184,19 @@ impl Sources {
         self.iter().any(|source| source.id() == id)
     }
 
+    pub fn get<'a>(&'a self, id: &SourceId) -> Option<&'a dyn Source> {
+        fn as_dyn_source(x: &impl Source) -> &dyn Source {
+            x
+        }
+        match id {
+            #[cfg(feature = "source-google-fonts")]
+            SourceId::GoogleFonts => {
+                self.google_fonts.as_ref().map(as_dyn_source)
+            }
+            _ => None,
+        }
+    }
+
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a dyn Source> {
         std::iter::once(self.google_fonts.as_ref().map(|a| a as &dyn Source))
             .flatten()

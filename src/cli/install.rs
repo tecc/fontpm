@@ -1,9 +1,12 @@
 use crate::cli::{tri, tri_f, CliContext, GlobalOptions};
-use crate::util::font::FontSpec;
+use crate::util::font::{Download, FontSpec};
 use anyhow::Context;
 use clap::{Args, ValueEnum};
 use console::style;
-use futures_util::TryFutureExt;
+use futures_util::future::try_join_all;
+use futures_util::FutureExt;
+use futures_util::{StreamExt, TryFutureExt};
+use indicatif::ProgressBar;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -72,8 +75,13 @@ pub enum Scope {
     Local,
 }
 
+const STEADY_TICK_SPEED: std::time::Duration =
+    std::time::Duration::from_millis(10);
+
 pub fn run(args: InstallArgs) -> ExitCode {
-    let cli = Arc::new(CliContext::new(&args.global));
+    let mut cli = CliContext::new(&args.global);
+    let mpb = cli.multiprogress();
+    let cli = Arc::new(cli);
     let scope = args.scope.resolve();
 
     let config = tri_f!(::load_config, &cli);
@@ -102,6 +110,7 @@ pub fn run(args: InstallArgs) -> ExitCode {
     let runtime = tri_f!(::tokio, &cli, &config);
     runtime.block_on(async {
         // 1. Get all possible resolutions for every single ID
+        // TODO: Add progress bars
 
         // TODO: Fix the mess of allocation that this madness is
         //       It's not an important thing to do but it's just all-around ugly
@@ -160,6 +169,8 @@ pub fn run(args: InstallArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
 
+        let _ = writeln!(cli.ok(), "Resolved fonts");
+
         // 2. Select exactly one resolution for each spec
         let specs = specs.into_iter()
             .map(|(spec, resolutions)| {
@@ -180,7 +191,56 @@ pub fn run(args: InstallArgs) -> ExitCode {
                 (spec, resolution)
             });
 
-        specs.for_each(|x| { dbg!(x); });
+        // 3. Install each file
+
+        let with_progress_bars = specs
+            .map(|(spec, resolved)| {
+                let pb = mpb.add(ProgressBar::new_spinner())
+                    .with_message(format!("Downloading {}", style(&spec).yellow()));
+                (spec, resolved, pb)
+            });
+
+        let pid = std::process::id();
+
+        let future = with_progress_bars
+            .enumerate()
+            .map(async |(idx, (_spec, resolved, pb))| {
+                for file in &resolved.files {
+                    match &file.download {
+                        Download::Url(url) => {
+                            let response = source_ctx.http.get(url.clone())
+                                .send()
+                                .await
+                                .context("getting download")?
+                                .error_for_status()
+                                .context("getting download")?;
+
+                            // NOTE: We make the perhaps ill-fated assumption
+                            // that whatever URL the source provides is a server
+                            // that is not malicious for now
+                            let expected_length = response.content_length();
+                            let download = source_ctx.store.download_to_tmp(
+                                response.bytes_stream(),
+                                expected_length,
+                                // TODO: Better way to ensure that temp files
+                                //       don't use conflicting names
+                                &format!("{}-{}-{}", pid, idx, file.name.file_name().unwrap_or("unnamed")),
+                                cli.modify_files,
+                                false,
+                                |current| {
+                                    pb.set_position(current as u64);
+                                },
+                            ).await?;
+                            dbg!(download);
+                        }
+                    }
+                }
+                Ok::<_, anyhow::Error>(())
+            });
+
+        let future: anyhow::Result<_, _> = try_join_all(future).await;
+
+        let future = tri!(future, cli.error(), "Failed to download fonts");
 
         ExitCode::SUCCESS
     })

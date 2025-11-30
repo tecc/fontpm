@@ -5,7 +5,9 @@ use crate::config::{config, util, Config, ConfigValue};
 use crate::source::{
     Refreshed, Source, SourceContext, SourceId, SourceSubcommand,
 };
-use crate::util::font::{FontFile, FontFileKind, FontSpec, ResolvedFont};
+use crate::util::font::{
+    Download, FontFile, FontFileKind, FontSpec, ResolvedFont,
+};
 use crate::util::store::ObjectId;
 use crate::util::{impl_serde_as_string, string_enum};
 use anyhow::Context;
@@ -168,17 +170,19 @@ impl Source for GoogleFonts {
             .send()
             .await?;
         let response = response.error_for_status()?;
+        let expected_length = response.content_length();
+        if let Some(total) = expected_length {
+            pb.set_length(total);
+        }
         let tmp = context
             .store
             .download_to_tmp(
-                response,
+                response.bytes_stream(),
+                expected_length,
                 "google-fonts-index",
                 context.cli.modify_files,
                 false,
-                |current, total| {
-                    if let Some(len) = total {
-                        pb.set_length(len as u64)
-                    }
+                |current| {
                     pb.set_position(current as u64);
                 },
             )
@@ -261,8 +265,13 @@ impl Source for GoogleFonts {
                     .variants
                     .iter()
                     .filter_map(|variant| {
-                        family.files.get(variant).map(|x| {
-                            let path = RelativePath::new(x);
+                        family.files.get(variant).map(|url_no_proto| {
+                            let download_url = Url::parse(&format!(
+                                "https://{}",
+                                url_no_proto
+                            ))
+                            .unwrap();
+                            let path = RelativePath::new(download_url.path());
                             let (dot, ext) = if let Some(ext) = path.extension()
                             {
                                 (".", ext)
@@ -280,6 +289,7 @@ impl Source for GoogleFonts {
                                     weight: Some(variant.weight.as_u32()),
                                     italic: variant.italic,
                                 },
+                                download: Download::Url(download_url),
                             }
                         })
                     })

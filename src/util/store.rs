@@ -10,7 +10,9 @@ use crate::util::keyed::Keyed;
 use anyhow::Context;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use bytes::Bytes;
 use dashmap::DashMap;
+use futures::Stream;
 use futures_util::StreamExt;
 use relative_path::RelativePath;
 use serde::{de, ser};
@@ -91,16 +93,16 @@ impl ObjectStore {
 
     pub async fn download_to_tmp(
         &self,
-        response: reqwest::Response,
+        mut stream: impl Stream<Item = Result<Bytes, impl Into<anyhow::Error>>>
+            + Unpin,
+        expected_length: Option<u64>,
         file_name: &str,
         write_file: bool,
         in_memory: bool,
-        mut update: impl FnMut(usize, Option<usize>),
+        mut update: impl FnMut(usize),
     ) -> anyhow::Result<TmpDownload> {
         // TODO: Figure out the interaction between this and dry-run mode
         let mut digest = ObjectHashAlgorithm::new();
-
-        let expected_length = response.content_length().map(|a| a as usize);
 
         let mut memory: Option<Vec<u8>> = in_memory.then(|| {
             expected_length
@@ -132,10 +134,9 @@ impl ObjectStore {
             None
         };
 
-        let mut stream = response.bytes_stream();
         let mut total = 0;
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
+            let chunk = chunk.map_err(Into::into)?;
             digest.update(&chunk);
             if let Some(memory) = &mut memory {
                 memory.extend_from_slice(chunk.as_ref());
@@ -144,7 +145,7 @@ impl ObjectStore {
                 file.write_all(chunk.as_ref()).await?;
             }
             total += chunk.len();
-            update(total, expected_length)
+            update(total)
         }
 
         if let Some((_path, file)) = &mut file {
@@ -211,6 +212,7 @@ impl ObjectStore {
     }
 }
 
+#[derive(Debug)]
 #[must_use]
 pub struct TmpDownload {
     pub hash: ObjectId,
