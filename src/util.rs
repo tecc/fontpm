@@ -2,8 +2,12 @@ pub mod font;
 pub mod keyed;
 pub mod store;
 
-use std::io;
+use serde::de::Error;
+use serde::{de, ser};
+use std::fmt::Write;
 use std::path::Path;
+use std::str::FromStr;
+use std::{fmt, io, marker};
 
 pub fn create_parent_all(path: impl AsRef<Path>) -> io::Result<()> {
     let path = path.as_ref();
@@ -62,22 +66,56 @@ macro_rules! string_enum {
             $variant_name
             ),*
         }
-        impl $enum_name {
-            pub fn from_str(s: &str) -> Option<Self> {
-                match s {
-                    $($variant_str $(| $variant_str_alias)* => Some(Self::$variant_name)),*,
-                    _ => None
+
+        const _: () = {
+            use std::fmt;
+
+            impl $enum_name {
+                pub fn from_str(s: &str) -> Option<Self> {
+                    match s {
+                        $($variant_str $(| $variant_str_alias)* => Some(Self::$variant_name)),*,
+                        _ => None
+                    }
                 }
-            }
-            pub const fn as_str(&self) -> &'static str {
-                match self {
-                    $(Self::$variant_name => $variant_str),*
+                pub const fn as_str(&self) -> &'static str {
+                    match self {
+                        $(Self::$variant_name => $variant_str),*
+                    }
                 }
             }
 
-        }
-        const _: () = {
-            use std::fmt;
+            impl clap::ValueEnum for $enum_name {
+                fn value_variants<'a>() -> &'a [Self] {
+                    &[$(Self::$variant_name),*]
+                }
+                fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+                    Some(clap::builder::PossibleValue::new(self.as_str()))
+                }
+                fn from_str(input: &str, ignore_case: bool) -> Result<Self, String> {
+                    if ignore_case {
+                         match input {
+                             $(
+                             s
+                             if (
+                                 s.eq_ignore_ascii_case($variant_str)
+                                 $(|| s.eq_ignore_ascii_case($variant_str_alias))*
+                             )
+                             => return Ok(Self::$variant_name)
+                             ),*,
+                             _ => {}
+                         }
+                    } else {
+                         match input {
+                             $(
+                             $variant_str $(| $variant_str_alias)* => return Ok(Self::$variant_name)
+                             ),*,
+                             _ => {}
+                         }
+                    }
+                    Err(format!("invalid variant: {}", input))
+                }
+            }
+
             impl std::str::FromStr for $enum_name {
                 type Err = $crate::util::NoSuchVariant;
                 fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -93,12 +131,84 @@ macro_rules! string_enum {
     };
 }
 
-use crate::config::Config;
 pub(crate) use string_enum;
 
 #[derive(Copy, Clone, Debug, thiserror::Error)]
 #[error("no such variant")]
 pub struct NoSuchVariant;
+
+pub struct AsString;
+impl AsString {
+    pub fn serialize<S, T>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+        T: fmt::Display,
+    {
+        let mut tmp = String::new();
+        write!(tmp, "{}", value).map_err(<S::Error as ser::Error>::custom)?;
+        serializer.serialize_str(&tmp)
+    }
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+    where
+        D: de::Deserializer<'de>,
+        T: FromStr,
+        T::Err: fmt::Display,
+    {
+        struct VisitorImpl<T>(marker::PhantomData<T>);
+        impl<'de, T> de::Visitor<'de> for VisitorImpl<T>
+        where
+            T: FromStr,
+            T::Err: fmt::Display,
+        {
+            type Value = T;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "a string")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                v.parse().map_err(E::custom)
+            }
+        }
+        deserializer.deserialize_str(VisitorImpl(marker::PhantomData))
+    }
+}
+
+macro_rules! impl_serde_as_string {
+    (
+        impl $( < $($impl_generics:ident)* > )? for $target_ty:ty
+    ) => {
+        const _: () = {
+            use serde::{de, ser};
+            impl$(<$($impl_generics)*>)? ser::Serialize for $target_ty
+            where
+                Self: fmt::Display
+            {
+                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                where
+                    S: ser::Serializer
+                {
+                    $crate::util::AsString::serialize(&self, serializer)
+                }
+            }
+            impl<'de, $($($impl_generics)*)?> de::Deserialize<'de> for $target_ty
+            where
+                Self: std::str::FromStr,
+                <Self as std::str::FromStr>::Err: fmt::Display
+            {
+                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                where
+                    D: de::Deserializer<'de>
+                {
+                    $crate::util::AsString::deserialize(deserializer)
+                }
+            }
+        };
+    };
+}
+use crate::config::Config;
+pub(crate) use impl_serde_as_string;
 
 #[cfg(test)]
 mod tests {

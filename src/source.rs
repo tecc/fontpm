@@ -21,7 +21,10 @@
 use crate::util::font::{FontSpec, ResolvedFont};
 use crate::util::store::ObjectStore;
 use crate::{cli::CliContext, config::Config};
+use anyhow::Context;
+use std::ffi::OsString;
 use std::fmt;
+use std::process::ExitCode;
 use std::sync::Arc;
 
 #[cfg(feature = "source-google-fonts")]
@@ -64,6 +67,22 @@ pub trait Source: Send {
         context: &Arc<SourceContext>,
         font: &FontSpec,
     ) -> anyhow::Result<Vec<ResolvedFont>>;
+
+    fn execute_command(&mut self, command: SourceSubcommand) -> ExitCode;
+}
+
+pub struct SourceSubcommand {
+    pub cli: CliContext,
+    pub config: Config,
+    pub args: Vec<OsString>,
+}
+
+pub type AnySource = Box<dyn Source>;
+pub fn new_any_source<T>(source: T) -> AnySource
+where
+    T: Source + 'static,
+{
+    Box::new(source)
 }
 
 /// More information about the result of refreshing the index.
@@ -83,14 +102,16 @@ pub struct SourceContext {
 }
 impl SourceContext {
     pub fn new(cli: Arc<CliContext>, config: &Config) -> anyhow::Result<Self> {
-        let store = ObjectStore::load(&cli, &config)?;
+        let store = ObjectStore::load(&cli, &config)
+            .context("could not load object store")?;
 
         Ok(Self {
             cli,
             store,
             http: reqwest::Client::builder()
                 .user_agent(config.fontpm.http.user_agent.resolved.clone())
-                .build()?,
+                .build()
+                .context("could not create HTTP client")?,
         })
     }
 }
@@ -136,6 +157,27 @@ impl Sources {
             }
         }
         Ok(sources)
+    }
+
+    pub fn create_specific(
+        cli: &CliContext,
+        config: &Config,
+        id: &SourceId,
+    ) -> Option<anyhow::Result<AnySource>> {
+        match id {
+            #[cfg(feature = "source-google-fonts")]
+            SourceId::GoogleFonts => {
+                let source = google_fonts::GoogleFonts::load(cli, config)
+                    .map(new_any_source);
+
+                Some(source)
+            }
+            #[cfg(not(feature = "source-google-fonts"))]
+            SourceId::GoogleFonts => Some(Err(anyhow::anyhow!(
+                "this build does not support Google Fonts source"
+            ))),
+            SourceId::Other(_other) => None,
+        }
     }
 
     pub fn is_enabled(&self, id: &SourceId) -> bool {

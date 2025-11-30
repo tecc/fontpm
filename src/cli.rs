@@ -2,6 +2,7 @@ mod config;
 mod install;
 mod list;
 mod refresh;
+mod source;
 
 use clap::{Args, Parser, Subcommand};
 use console::{style, StyledObject};
@@ -33,7 +34,7 @@ pub struct CliArgs {
 /// To access these options in commands, add this struct as a field.
 #[derive(Debug, Args)]
 pub struct GlobalOptions {
-    /// Simulate the changes without writing anything to disk.
+    /// Avoid modifying files if at all possible.
     #[arg(long = "dry-run", global = true)]
     pub dry_run: bool,
     /// Increase the verbosity of the output.
@@ -45,6 +46,7 @@ pub enum CliCommand {
     Config(config::ConfigArgs),
     Install(install::InstallArgs),
     Refresh(refresh::RefreshArgs),
+    Source(source::SourceArgs),
 }
 
 pub fn run() -> ExitCode {
@@ -54,6 +56,7 @@ pub fn run() -> ExitCode {
         CliCommand::Config(args) => config::run(args),
         CliCommand::Install(args) => install::run(args),
         CliCommand::Refresh(args) => refresh::run(args),
+        CliCommand::Source(args) => source::run(args),
     }
 }
 
@@ -175,7 +178,7 @@ macro_rules! tri {
                     let _ = writeln!(
                         $cli_out,
                         "{}: {}",
-                        format_args!($fmt $($fmt_args)*),
+                        format_args!($fmt $(, $fmt_args)*),
                         e
                     );
                     return ExitCode::FAILURE;

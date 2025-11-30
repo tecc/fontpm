@@ -2,8 +2,10 @@
 
 use crate::cli::CliContext;
 use crate::config::{config, util, Config, ConfigValue};
-use crate::source::{Refreshed, Source, SourceContext, SourceId};
-use crate::util::font::{FontSpec, ResolvedFont};
+use crate::source::{
+    Refreshed, Source, SourceContext, SourceId, SourceSubcommand,
+};
+use crate::util::font::{FontFile, FontFileKind, FontSpec, ResolvedFont};
 use crate::util::store::ObjectId;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
@@ -11,7 +13,10 @@ use indicatif::ProgressBar;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::path::Path;
+use std::process::ExitCode;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::OnceCell as AsyncOnceCell;
 
@@ -254,6 +259,10 @@ impl Source for GoogleFonts {
         } else {
             Ok(vec![])
         }
+    }
+
+    fn execute_command(&mut self, command: SourceSubcommand) -> ExitCode {
+        todo!("google fonts todo")
     }
 }
 
