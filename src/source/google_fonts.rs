@@ -7,9 +7,11 @@ use crate::source::{
 };
 use crate::util::font::{FontFile, FontFileKind, FontSpec, ResolvedFont};
 use crate::util::store::ObjectId;
+use crate::util::{impl_serde_as_string, string_enum};
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use indicatif::ProgressBar;
+use relative_path::{RelativePath, RelativePathBuf};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -255,6 +257,33 @@ impl Source for GoogleFonts {
                 source: self.id().clone(),
                 version: family.version.to_string(),
                 timestamp: family.last_modified,
+                files: family
+                    .variants
+                    .iter()
+                    .filter_map(|variant| {
+                        family.files.get(variant).map(|x| {
+                            let path = RelativePath::new(x);
+                            let (dot, ext) = if let Some(ext) = path.extension()
+                            {
+                                (".", ext)
+                            } else {
+                                ("", "")
+                            };
+                            FontFile {
+                                name: format!(
+                                    "{}-{}{}{}",
+                                    family.id, variant, dot, ext
+                                )
+                                .into(),
+                                kind: FontFileKind::Family {
+                                    axes: vec![],
+                                    weight: Some(variant.weight.as_u32()),
+                                    italic: variant.italic,
+                                },
+                            }
+                        })
+                    })
+                    .collect(),
             }])
         } else {
             Ok(vec![])
@@ -288,6 +317,113 @@ struct FontDescription {
     pub tags: Vec<String>,
     #[serde(alias = "lastModified", with = "chrono::serde::ts_seconds")]
     pub last_modified: DateTime<Utc>,
-    pub files: HashMap<String, String>,
-    pub variants: Vec<String>,
+    pub files: HashMap<Variant, String>,
+    pub variants: Vec<Variant>,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+struct Variant {
+    weight: Weight,
+    italic: bool,
+}
+impl_serde_as_string!(impl for Variant);
+impl fmt::Display for Variant {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match (self.weight, self.italic) {
+            (Weight::Regular, false) => write!(f, "regular"),
+            (Weight::Regular, true) => write!(f, "italic"),
+            (weight, false) => write!(f, "{}", weight),
+            (weight, true) => write!(f, "{}italic", weight),
+        }
+    }
+}
+impl FromStr for Variant {
+    type Err = crate::util::NoSuchVariant;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "regular" => Ok(Self {
+                weight: Weight::Regular,
+                italic: false,
+            }),
+            "italic" => Ok(Self {
+                weight: Weight::Regular,
+                italic: true,
+            }),
+            s => {
+                let (s, italic) = if let Some(weight) = s.strip_suffix("italic")
+                {
+                    (weight, true)
+                } else {
+                    (s, false)
+                };
+                Ok(Self {
+                    weight: s.parse()?,
+                    italic,
+                })
+            }
+        }
+    }
+}
+string_enum!(
+    #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum Weight {
+        _100 = "100",
+        _200 = "200",
+        _300 = "300",
+        Regular = "regular",
+        _500 = "500",
+        _600 = "600",
+        _700 = "700",
+        _800 = "800",
+        _900 = "900",
+    }
+);
+impl Weight {
+    fn as_u32(self) -> u32 {
+        match self {
+            Self::_100 => 100,
+            Self::_200 => 200,
+            Self::_300 => 300,
+            Self::Regular => 400,
+            Self::_500 => 500,
+            Self::_600 => 600,
+            Self::_700 => 700,
+            Self::_800 => 800,
+            Self::_900 => 900,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_variants() {
+        for (input, weight, italic) in [
+            ("100", Weight::_100, false),
+            ("100italic", Weight::_100, true),
+            ("200", Weight::_200, false),
+            ("200italic", Weight::_200, true),
+            ("300", Weight::_300, false),
+            ("300italic", Weight::_300, true),
+            ("regular", Weight::Regular, false),
+            ("italic", Weight::Regular, true),
+            ("500", Weight::_500, false),
+            ("500italic", Weight::_500, true),
+            ("600", Weight::_600, false),
+            ("600italic", Weight::_600, true),
+            ("700", Weight::_700, false),
+            ("700italic", Weight::_700, true),
+            ("800", Weight::_800, false),
+            ("800italic", Weight::_800, true),
+            ("900", Weight::_900, false),
+            ("900italic", Weight::_900, true),
+        ] {
+            let parsed_variant = Variant::from_str(input).unwrap();
+            assert_eq!(parsed_variant.weight, weight);
+            assert_eq!(parsed_variant.italic, italic);
+            assert_eq!(input, parsed_variant.to_string());
+        }
+    }
 }

@@ -1,5 +1,7 @@
 use crate::source::SourceId;
+use crate::util::string_enum;
 use chrono::{DateTime, Utc};
+use relative_path::RelativePathBuf;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -55,9 +57,36 @@ pub struct ResolvedFont {
     pub source: SourceId,
     pub version: String,
     pub timestamp: DateTime<Utc>,
+    pub files: Vec<FontFile>,
 }
 impl fmt::Display for ResolvedFont {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}:{}@{}", self.source, self.id, self.version)
     }
 }
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
+pub struct FontFile {
+    pub name: RelativePathBuf,
+    pub kind: FontFileKind,
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
+pub enum FontFileKind {
+    Family {
+        axes: Vec<FontAxis>,
+        weight: Option<u32>,
+        italic: bool,
+    },
+}
+
+string_enum!(
+    pub enum FontAxis {
+        Weight = "wght",
+        // TODO: Research well-known axes
+    }
+);
