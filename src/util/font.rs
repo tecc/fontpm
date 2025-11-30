@@ -49,19 +49,23 @@ pub enum FontSpecError {
     #[error("invalid source: {0}")]
     Source(<SourceId as FromStr>::Err),
 }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ResolvedFont {
+    pub reference: FontReference,
+    pub files: Vec<FontFile>,
+}
 
 /// Generic resolved font struct.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
 )]
-pub struct ResolvedFont {
+pub struct FontReference {
     pub id: String,
     pub source: SourceId,
     pub version: String,
     pub timestamp: DateTime<Utc>,
-    pub files: Vec<FontFile>,
 }
-impl fmt::Display for ResolvedFont {
+impl fmt::Display for FontReference {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}:{}@{}", self.source, self.id, self.version)
     }

@@ -162,7 +162,7 @@ pub fn run(args: InstallArgs) -> ExitCode {
                 errors += 1;
                 continue;
             }
-            resolved.sort();
+            resolved.sort_by_key(|resolved| &resolved.reference);
         }
         if errors > 0 {
             let _ = writeln!(cli.error(), "{} error(s) occurred (see above)", errors);
@@ -180,7 +180,7 @@ pub fn run(args: InstallArgs) -> ExitCode {
                     let resolution = dialoguer::Select::new()
                         .with_prompt(format!("Select a resolution for {}", style(&spec).yellow()))
                         .default(0)
-                        .items(resolutions.iter().map(|res| res.to_string()))
+                        .items(resolutions.iter().map(|res| res.reference.to_string()))
                         .interact_on(&cli.term)
                         .context("handling user input")
                         .unwrap();
