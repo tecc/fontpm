@@ -300,12 +300,22 @@ impl Keyed<Arc<ObjectId>> for Object {
 ///       but it can't be too big either.
 pub type ObjectHashAlgorithm = sha2::Sha256;
 
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct ObjectId(ObjectHashOutput);
 impl ObjectId {
     pub fn from_ref(output: &ObjectHashOutput) -> &ObjectId {
         unsafe { std::mem::transmute(output) }
+    }
+}
+impl fmt::Debug for ObjectId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut buf = [0u8; 128];
+        let size = URL_SAFE_NO_PAD
+            .encode_slice(self.0.as_slice(), &mut buf)
+            .map_err(|_| fmt::Error)?;
+        let data = unsafe { str::from_utf8_unchecked(&buf[0..size]) };
+        f.debug_tuple("ObjectId").field(&data).finish()
     }
 }
 impl fmt::Display for ObjectId {
