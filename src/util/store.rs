@@ -280,7 +280,9 @@ impl ObjectStoreIndex {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct Object {
     /// A hash of the object's contents.
     pub hash: Arc<ObjectId>,

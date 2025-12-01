@@ -1,4 +1,5 @@
 use crate::cli::{tri, tri_f, CliContext, GlobalOptions};
+use crate::platform::{FontObject, FontToInstall, Platform};
 use crate::util::font::{Download, FontSpec};
 use anyhow::Context;
 use clap::{Args, ValueEnum};
@@ -87,6 +88,12 @@ pub fn run(args: InstallArgs) -> ExitCode {
     let config = tri_f!(::load_config, &cli);
     let sources = tri_f!(::create_sources, &cli, &config);
 
+    let mut platform = tri!(
+        Platform::load(&cli, &config),
+        cli.error(),
+        "Could not load platform"
+    );
+
     let mut ok = true;
     for spec in &args.fonts {
         if let Some(source) = &spec.source {
@@ -162,7 +169,7 @@ pub fn run(args: InstallArgs) -> ExitCode {
                 errors += 1;
                 continue;
             }
-            resolved.sort_by_key(|resolved| &resolved.reference);
+            resolved.sort_by(|a, b| a.reference.cmp(&b.reference));
         }
         if errors > 0 {
             let _ = writeln!(cli.error(), "{} error(s) occurred (see above)", errors);
@@ -205,7 +212,11 @@ pub fn run(args: InstallArgs) -> ExitCode {
         let future = with_progress_bars
             .enumerate()
             .map(async |(idx, (_spec, resolved, pb))| {
-                for file in &resolved.files {
+                let mut to_install = FontToInstall {
+                    reference: resolved.reference,
+                    objects: vec![],
+                };
+                for file in resolved.files {
                     match &file.download {
                         Download::Url(url) => {
                             let response = source_ctx.http.get(url.clone())
@@ -231,16 +242,38 @@ pub fn run(args: InstallArgs) -> ExitCode {
                                     pb.set_position(current as u64);
                                 },
                             ).await?;
-                            dbg!(download);
+                            let Some(object) = source_ctx.store.index_object(download.hash)
+                                .or_else(|| source_ctx.store.get_object(&download.hash)) else {
+                                anyhow::bail!("object {} could not be indexed", download.hash)
+                            };
+                            let path = source_ctx.store.resolve_object_path(&object.path);
+                            download.move_to(&path, &cli).await?;
+
+                            to_install.objects.push(FontObject {
+                                name: file.name,
+                                kind: file.kind,
+                                object
+                            })
                         }
                     }
                 }
-                Ok::<_, anyhow::Error>(())
+                to_install.objects.sort();
+                Ok::<_, anyhow::Error>(to_install)
             });
 
-        let future: anyhow::Result<_, _> = try_join_all(future).await;
+        let fonts_to_install: anyhow::Result<_, _> = try_join_all(future).await;
 
-        let future = tri!(future, cli.error(), "Failed to download fonts");
+        let fonts_to_install = tri!(fonts_to_install, cli.error(), "Failed to download fonts");
+
+        match scope {
+            Scope::Global => {
+                todo!()
+                // tri!(platform.install_fonts_global(&source_ctx, fonts_to_install).await, cli.error(), "Could not install global fonts");
+            },
+            Scope::Local => {
+                tri!(platform.install_fonts_local(&source_ctx, fonts_to_install).await, cli.error(), "Could not install local fonts");
+            }
+        }
 
         ExitCode::SUCCESS
     })

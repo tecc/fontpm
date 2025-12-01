@@ -32,9 +32,14 @@
 
 use crate::cli::CliContext;
 use crate::config::Config;
-use crate::util::font::ResolvedFont;
+use crate::source::SourceContext;
+use crate::util::font::{FontFileKind, FontReference};
+use crate::util::store::{Object, ObjectId};
 use crate::util::string_enum;
-use std::path::PathBuf;
+use relative_path::RelativePathBuf;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -68,6 +73,16 @@ impl Platform {
             inner: imp::Platform::load(cli, config)?,
         })
     }
+
+    pub async fn install_fonts_local(
+        &mut self,
+        context: &SourceContext,
+        fonts_to_install: Vec<FontToInstall>,
+    ) -> anyhow::Result<()> {
+        self.inner
+            .install_fonts_local(context, fonts_to_install)
+            .await
+    }
 }
 
 /// Platform-specific functionality required by FontPM.
@@ -82,19 +97,33 @@ trait PlatformImpl: Sized {
     /// Default local (user-specific) font installation directory.
     fn default_local_font_dir() -> anyhow::Result<PathBuf>;
 
-    /// Install a global font.
-    fn install_font_global(&mut self);
-    /// Uninstall a global font.
-    fn uninstall_font_global(&mut self);
-    /// Install a local font.
-    fn install_font_local(&mut self);
-    /// Uninstall a local font.
-    fn uninstall_font_local(&mut self);
+    /// Install fonts locally.
+    ///
+    /// # Implementation notes
+    ///
+    /// This method MUST respect `modify_files`.
+    async fn install_fonts_local(
+        &mut self,
+        cli: &SourceContext,
+        fonts: Vec<FontToInstall>,
+    ) -> anyhow::Result<()>;
 }
 
-pub struct InstallFontArgs {
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
+pub struct FontToInstall {
     /// The font to install
-    pub reference: ResolvedFont,
+    pub reference: FontReference,
+    pub objects: Vec<FontObject>,
+}
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
+pub struct FontObject {
+    pub name: RelativePathBuf,
+    pub kind: FontFileKind,
+    pub object: Arc<Object>,
 }
 
 string_enum!(
