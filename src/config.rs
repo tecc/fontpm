@@ -17,6 +17,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct Config {
     pub paths: ConfigPaths,
     pub fontpm_toml: FileTable,
@@ -165,6 +166,7 @@ impl Config {
     }
 }
 
+#[derive(Debug)]
 pub struct FontpmConfig {
     /// Path to the file store.
     ///
@@ -210,6 +212,8 @@ pub struct FontpmConfig {
                                         // pub global_strategy: ConfigValue<Arc<[InstallStrategy]>>,
                                         // pub local_strategy: ConfigValue<Arc<[InstallStrategy]>>
 }
+
+#[derive(Debug)]
 pub struct FontpmHttpConfig {
     /// User agent to use in HTTP requests.
     ///
@@ -220,6 +224,7 @@ pub struct FontpmHttpConfig {
     pub user_agent: ConfigValue<HeaderValue>,
 }
 
+#[derive(Debug)]
 pub struct FontpmPlatformConfig {
     /// Directory to store global fonts in.
     ///
@@ -261,7 +266,7 @@ impl FontpmConfig {
                 .join("fontpm/store"))),
         )
         .fail(ctx, "store directory")?
-        .map(util::to_arc_path);
+        .resolve_path();
 
         let download_tmp_dir = config!(
             env("FONTPM_DOWNLOAD_TMP_DIR", then: Ok),
@@ -269,7 +274,7 @@ impl FontpmConfig {
             builtin(Ok(store_dir.resolved.join("tmp")))
         )
         .fail(ctx, "temporary directory for downloads")?
-        .map(util::to_arc_path);
+        .resolve_path();
 
         let enabled_sources = config!(
             env("FONTPM_ENABLED_SOURCES", then: util::comma_separated_list_fromstr),
@@ -300,7 +305,7 @@ impl FontpmConfig {
             builtin(platform::default_global_font_dir())
         )
         .fail(ctx, "global font install directory")?
-        .map(util::to_arc_path);
+        .resolve_path();
 
         let local_font_dir = config!(
             env("FONTPM_LOCAL_FONT_DIR", then: Ok),
@@ -308,7 +313,7 @@ impl FontpmConfig {
             builtin(platform::default_local_font_dir())
         )
         .fail(ctx, "local font install directory")?
-        .map(util::to_arc_path);
+        .resolve_path();
 
         Ok(Self {
             store_dir,
@@ -372,8 +377,25 @@ pub mod util {
     pub fn to_arc_path(path: PathBuf) -> Arc<Path> {
         Arc::from(path)
     }
+    pub fn resolve_path(
+        path: PathBuf,
+        source: &ConfigValueSource,
+    ) -> Arc<Path> {
+        let resolved = match source {
+            ConfigValueSource::TomlFile {
+                path: config_path, ..
+            } => {
+                let parent =
+                    config_path.parent().expect("config path has no parent");
+                parent.join(path)
+            }
+            _ => path,
+        };
+        Arc::from(resolved)
+    }
 }
 
+#[derive(Debug)]
 pub struct ConfigPaths {
     /// Path to the configuration directory.
     ///
@@ -447,6 +469,20 @@ impl<T> ConfigValue<T> {
             resolved: f(self.resolved),
             source: self.source,
         }
+    }
+    pub fn map_with_source<O>(
+        self,
+        f: impl FnOnce(T, &ConfigValueSource) -> O,
+    ) -> ConfigValue<O> {
+        ConfigValue {
+            resolved: f(self.resolved, &self.source),
+            source: self.source,
+        }
+    }
+}
+impl ConfigValue<PathBuf> {
+    pub fn resolve_path(self) -> ConfigValue<Arc<Path>> {
+        self.map_with_source(util::resolve_path)
     }
 }
 
@@ -548,6 +584,7 @@ impl<T> ConfigValue<Option<T>> {
     }
 }
 
+#[derive(Debug)]
 pub struct FileTable {
     pub document: toml_edit::DocumentMut,
     pub path: Arc<Path>,
