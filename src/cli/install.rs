@@ -38,6 +38,11 @@ pub struct InstallArgs {
     /// get the font from, `<font>` is the ID of the font to install.
     #[arg(value_parser = str::parse::<FontSpec>, required = true)]
     pub fonts: Vec<FontSpec>,
+    /// Installs fonts, even if they are already installed.
+    ///
+    /// WARNING: This may be buggy.
+    #[arg(short, long)]
+    pub force: bool,
 }
 
 #[derive(Copy, Clone, Debug, Args)]
@@ -239,7 +244,7 @@ pub fn run(args: InstallArgs) -> ExitCode {
 
                 match platform.is_font_installed_local(&source_ctx, &resolved.reference).await {
                     Ok(install_state) => {
-                        if install_state.fontpm {
+                        if !args.force && install_state.fontpm {
                             let _ = writeln!(cli.debug(), "Font {} is already installed, skipping", resolved.reference);
                             pb.finish_with_message("Skipped (already installed)");
                             return Ok(None);
