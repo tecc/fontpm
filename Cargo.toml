@@ -27,6 +27,7 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 indicatif = "0.18.3"
 relative-path = { version = "2.0.1", features = ["serde"] }
+read-fonts = "0.36.0"
 reqwest = { version = "0.12.24", features = ["json", "stream"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde-value = "0.7.0"

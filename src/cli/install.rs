@@ -8,6 +8,7 @@ use futures_util::future::try_join_all;
 use futures_util::FutureExt;
 use futures_util::{StreamExt, TryFutureExt};
 use indicatif::ProgressBar;
+use std::convert::identity;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -183,7 +184,11 @@ pub fn run(args: InstallArgs) -> ExitCode {
             .map(|(spec, resolutions)| {
                 // INVARIANT:
                 // At this point there must be at least one element in each vec
-                let resolution = if resolutions.len() > 1 {
+                let resolved = if resolutions.len() > 1 {
+                    if args.noninteractive {
+                        let error = anyhow::format_err!("font {} cannot be resolved unambiguously", spec);
+                        return (spec, Err(error));
+                    }
                     let resolution = dialoguer::Select::new()
                         .with_prompt(format!("Select a resolution for {}", style(&spec).yellow()))
                         .default(0)
@@ -195,7 +200,7 @@ pub fn run(args: InstallArgs) -> ExitCode {
                 } else {
                     resolutions.into_iter().next().expect("invariant broken: at least one resolution must exist for each spec")
                 };
-                (spec, resolution)
+                (spec, Ok(resolved))
             });
 
         // 3. Install each file
@@ -203,73 +208,106 @@ pub fn run(args: InstallArgs) -> ExitCode {
         let with_progress_bars = specs
             .map(|(spec, resolved)| {
                 let pb = mpb.add(ProgressBar::new_spinner())
-                    .with_message(format!("Downloading {}", style(&spec).yellow()));
+                    .with_message(format!("Resolving {}", style(&spec).yellow()));
                 (spec, resolved, pb)
             });
 
         let pid = std::process::id();
 
-        let future = with_progress_bars
-            .enumerate()
-            .map(async |(idx, (_spec, resolved, pb))| {
-                let mut to_install = FontToInstall {
-                    reference: resolved.reference,
-                    objects: vec![],
-                };
-                for file in resolved.files {
-                    match &file.download {
-                        Download::Url(url) => {
-                            let response = source_ctx.http.get(url.clone())
-                                .send()
-                                .await
-                                .context("getting download")?
-                                .error_for_status()
-                                .context("getting download")?;
+        let futures = futures::stream::iter(with_progress_bars
+            .enumerate())
+            .then(|(idx, (spec, resolved, pb))| {
+                let cli = cli.clone();
+                let platform = platform.clone();
+                let source_ctx = source_ctx.clone();
+                async move {
+                    let resolved = match resolved {
+                        Ok(x) => x,
+                        Err(e) => {
+                            let _ = writeln!(cli.error(), "Could not resolve {}: {}", spec, e);
 
-                            // NOTE: We make the perhaps ill-fated assumption
-                            // that whatever URL the source provides is a server
-                            // that is not malicious for now
-                            let expected_length = response.content_length();
-                            let download = source_ctx.store.download_to_tmp(
-                                response.bytes_stream(),
-                                expected_length,
-                                // TODO: Better way to ensure that temp files
-                                //       don't use conflicting names
-                                &format!("{}-{}-{}", pid, idx, file.name.file_name().unwrap_or("unnamed")),
-                                cli.modify_files,
-                                false,
-                                |current| {
-                                    pb.set_position(current as u64);
-                                },
-                            ).await?;
-                            let Some(object) = source_ctx.store.index_object(download.hash)
-                                .or_else(|| source_ctx.store.get_object(&download.hash)) else {
-                                anyhow::bail!("object {} could not be indexed", download.hash)
-                            };
-                            let path = source_ctx.store.resolve_object_path(&object.path);
-                            download.move_to(&path, &cli).await?;
+                            pb.finish_with_message("Failed to resolve");
+                            return Err(e);
+                        }
+                    };
 
-                            to_install.objects.push(FontObject {
-                                name: file.name,
-                                kind: file.kind,
-                                object
-                            })
+                    match platform.is_font_installed_local(&source_ctx, &resolved.reference).await {
+                        Ok(install_state) => {
+                            if install_state.fontpm {
+                                let _ = writeln!(cli.debug(), "Font {} is already installed, skipping", resolved.reference);
+                                pb.finish_with_message("Skipped (already installed)");
+                                return Ok(None);
+                            }
+                        }
+                        Err(e) => {
+                            let _ = writeln!(cli.warn(), "Could not check install state of {} ({}) - proceeding to install", resolved.reference, e);
                         }
                     }
+
+                    pb.set_message(format!("Downloading {}", style(&resolved.reference).yellow()));
+
+                    let mut to_install = FontToInstall {
+                        reference: resolved.reference,
+                        objects: vec![],
+                    };
+                    for file in resolved.files {
+                        match &file.download {
+                            Download::Url(url) => {
+                                let response = source_ctx.http.get(url.clone())
+                                    .send()
+                                    .await
+                                    .context("getting download")?
+                                    .error_for_status()
+                                    .context("getting download")?;
+
+                                // NOTE: We make the perhaps ill-fated assumption
+                                // that whatever URL the source provides is a server
+                                // that is not malicious for now
+                                let expected_length = response.content_length();
+                                let download = source_ctx.store.download_to_tmp(
+                                    response.bytes_stream(),
+                                    expected_length,
+                                    // TODO: Better way to ensure that temp files
+                                    //       don't use conflicting names
+                                    &format!("{}-{}-{}", pid, idx, file.name.file_name().unwrap_or("unnamed")),
+                                    cli.modify_files,
+                                    false,
+                                    |current| {
+                                        pb.set_position(current as u64);
+                                    },
+                                ).await?;
+                                let Some(object) = source_ctx.store.index_object(download.hash)
+                                    .or_else(|| source_ctx.store.get_object(&download.hash)) else {
+                                    anyhow::bail!("object {} could not be indexed", download.hash)
+                                };
+                                let path = source_ctx.store.resolve_object_path(&object.path);
+                                download.move_to(&path, &cli).await?;
+
+                                to_install.objects.push(FontObject {
+                                    name: file.name,
+                                    kind: file.kind,
+                                    object,
+                                })
+                            }
+                        }
+                    }
+                    to_install.objects.sort();
+                    Ok::<_, anyhow::Error>(Some(to_install))
                 }
-                to_install.objects.sort();
-                Ok::<_, anyhow::Error>(to_install)
             });
+        let mut futures = Box::pin(futures);
 
-        let fonts_to_install: anyhow::Result<_, _> = try_join_all(future).await;
-
-        let fonts_to_install = tri!(fonts_to_install, cli.error(), "Failed to download fonts");
+        let mut fonts_to_install = vec![];
+        while let Some(result) = futures.next().await {
+            let font = tri!(result, cli.error(), "Failed to download font");
+            if let Some(font) = font { fonts_to_install.push(font) }
+        }
 
         match scope {
             Scope::Global => {
                 todo!()
                 // tri!(platform.install_fonts_global(&source_ctx, fonts_to_install).await, cli.error(), "Could not install global fonts");
-            },
+            }
             Scope::Local => {
                 tri!(platform.install_fonts_local(&source_ctx, fonts_to_install).await, cli.error(), "Could not install local fonts");
             }

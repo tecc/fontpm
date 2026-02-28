@@ -1,23 +1,26 @@
 use crate::cli::CliContext;
 use crate::config::Config;
-use crate::platform::{FontToInstall, InstallStrategy};
+use crate::platform::{FontInstallState, FontToInstall, InstallStrategy};
 use crate::source::SourceContext;
 use crate::util::font::FontReference;
 use anyhow::Context;
 use relative_path::RelativePathBuf;
+use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use tokio::sync::OnceCell as AsyncOnceCell;
 
-pub struct Platform {
+pub type Platform = Arc<PlatformInner>;
+
+pub struct PlatformInner {
     global_dir: Arc<Path>,
     local_dir: Arc<Path>,
     local_strategies: Arc<[InstallStrategy]>,
     local_storage: AsyncOnceCell<StorageLocation>,
 }
 
-impl Platform {
+impl PlatformInner {
     /// Links an object according to a strategy.
     ///
     /// Does not respect `modify_files`.
@@ -91,12 +94,12 @@ struct LinkFailed;
 
 impl super::PlatformImpl for Platform {
     fn load(_cli: &CliContext, config: &Config) -> anyhow::Result<Self> {
-        Ok(Self {
+        Ok(Arc::new(PlatformInner {
             global_dir: config.fontpm.platform.global_font_dir.resolved.clone(),
             local_dir: config.fontpm.platform.local_font_dir.resolved.clone(),
             local_strategies: config.fontpm.install_strategy.resolved.clone(),
             local_storage: AsyncOnceCell::new(),
-        })
+        }))
     }
 
     fn default_global_font_dir() -> anyhow::Result<PathBuf> {
@@ -108,8 +111,25 @@ impl super::PlatformImpl for Platform {
             .context("no font directory available")
     }
 
+    async fn is_font_installed_local(
+        &self,
+        ctx: &SourceContext,
+        font: &FontReference,
+    ) -> anyhow::Result<FontInstallState> {
+        let storage = self.get_local_storage(&ctx.cli).await?;
+        let Ok(guard) = storage.lockfile.read() else {
+            anyhow::bail!("lockfile data is poisoned")
+        };
+
+        Ok(FontInstallState {
+            fontpm: guard.fonts.contains_key(font),
+            // TODO: Use fontconfig to check if it is installed externally
+            external: false,
+        })
+    }
+
     async fn install_fonts_local(
-        &mut self,
+        &self,
         ctx: &SourceContext,
         fonts: Vec<FontToInstall>,
     ) -> anyhow::Result<()> {
@@ -178,11 +198,14 @@ impl super::PlatformImpl for Platform {
                 anyhow::bail!("could not acquire lock to lockfile data because it was poisoned")
             };
 
-            guard.fonts.push(LockedFont {
-                reference: font.reference,
-                base_path: font_base_path,
-                files,
-            })
+            guard.fonts.insert(
+                font.reference.clone(),
+                LockedFont {
+                    reference: font.reference,
+                    base_path: font_base_path,
+                    files,
+                },
+            );
         }
 
         local_storage.save(&ctx.cli).await?;
@@ -256,7 +279,7 @@ impl StorageLocation {
                 .context("creating parent directory")?;
         }
         let serialised =
-            serde_json::to_vec(value).context("serialising data")?;
+            serde_json::to_vec_pretty(value).context("serialising data")?;
         tokio::fs::write(out, &serialised)
             .await
             .context("writing lockfile")?;
@@ -276,17 +299,18 @@ impl StorageLocation {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct LockfileData {
-    fonts: Vec<LockedFont>,
+    fonts: BTreeMap<FontReference, LockedFont>,
 }
 impl LockfileData {
     pub fn new() -> Self {
-        Self { fonts: vec![] }
+        Self {
+            fonts: BTreeMap::default(),
+        }
     }
     pub fn ensure_consistency(&mut self) {
         self.fonts
-            .iter_mut()
+            .values_mut()
             .for_each(LockedFont::ensure_consistency);
-        self.fonts.sort();
     }
 }
 

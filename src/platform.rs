@@ -64,6 +64,7 @@ pub fn default_local_font_dir() -> anyhow::Result<PathBuf> {
     <imp::Platform as PlatformImpl>::default_local_font_dir()
 }
 
+#[derive(Clone)]
 pub struct Platform {
     inner: imp::Platform,
 }
@@ -74,6 +75,13 @@ impl Platform {
         })
     }
 
+    pub async fn is_font_installed_local(
+        &self,
+        context: &SourceContext,
+        font: &FontReference,
+    ) -> anyhow::Result<FontInstallState> {
+        self.inner.is_font_installed_local(context, font).await
+    }
     pub async fn install_fonts_local(
         &mut self,
         context: &SourceContext,
@@ -97,16 +105,43 @@ trait PlatformImpl: Sized {
     /// Default local (user-specific) font installation directory.
     fn default_local_font_dir() -> anyhow::Result<PathBuf>;
 
+    async fn is_font_installed_local(
+        &self,
+        context: &SourceContext,
+        font: &FontReference,
+    ) -> anyhow::Result<FontInstallState>;
+
     /// Install fonts locally.
     ///
     /// # Implementation notes
     ///
     /// This method MUST respect `modify_files`.
     async fn install_fonts_local(
-        &mut self,
-        cli: &SourceContext,
+        &self,
+        context: &SourceContext,
         fonts: Vec<FontToInstall>,
     ) -> anyhow::Result<()>;
+}
+
+/// Represents how a font is installed on the current system.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct FontInstallState {
+    /// The font is installed through FontPM.
+    pub fontpm: bool,
+    /// The font is installed through external means.
+    ///
+    /// More specifically, a font is installed externally installed iff:
+    /// 1. an installation of the font is detected (for example, Fontconfig
+    ///    reporting the font to already be installed).
+    /// 2. that installation not being in the scope that this struct was
+    ///    requested for
+    ///
+    /// This means that if a font was installed globally, but the check is
+    /// done locally, `external` should be true instead of `fontpm`. This does
+    /// not apply if the check is being done for both the global and local
+    /// scope, in which case it is only `external` if the font is not in either
+    /// location.
+    pub external: bool,
 }
 
 #[derive(
