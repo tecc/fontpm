@@ -6,7 +6,8 @@ use crate::source::{
     Refreshed, Source, SourceContext, SourceId, SourceSubcommand,
 };
 use crate::util::font::{
-    Download, FontFile, FontFileKind, FontReference, FontSpec, ResolvedFont,
+    Download, FontFile, FontFileKind, FontIdentifier, FontReference, FontSpec,
+    ResolvedFont,
 };
 use crate::util::store::ObjectId;
 use crate::util::{impl_serde_as_string, string_enum};
@@ -258,8 +259,10 @@ impl Source for GoogleFonts {
         if let Some(family) = index.families.get(&font.id) {
             Ok(vec![ResolvedFont {
                 reference: FontReference {
-                    id: family.id.to_string(),
-                    source: self.id().clone(),
+                    identifier: FontIdentifier {
+                        id: family.id.to_string(),
+                        source: self.id().clone(),
+                    },
                     version: family.version.to_string(),
                     timestamp: family.last_modified,
                 },
