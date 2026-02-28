@@ -1,9 +1,9 @@
 use crate::source::SourceId;
-use crate::util::string_enum;
+use crate::util::{impl_serde_as_string, string_enum};
 use chrono::{DateTime, Utc};
 use relative_path::RelativePathBuf;
 use reqwest::Url;
-use serde::{Deserialize, Serialize};
+use serde::{de, ser, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
@@ -60,16 +60,44 @@ pub struct ResolvedFont {
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
 )]
 pub struct FontReference {
-    pub id: String,
-    pub source: SourceId,
+    pub identifier: FontIdentifier,
     pub version: String,
     pub timestamp: DateTime<Utc>,
 }
 impl fmt::Display for FontReference {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}:{}@{}", self.source, self.id, self.version)
+        write!(f, "{}@{}", self.identifier, self.version)
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FontIdentifier {
+    pub source: SourceId,
+    pub id: String,
+}
+impl_serde_as_string!(impl for FontIdentifier);
+
+impl fmt::Display for FontIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.source, self.id)
+    }
+}
+impl FromStr for FontIdentifier {
+    type Err = InvalidFontIdentifier;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let Some((source, id)) = s.split_once(":") else {
+            return Err(InvalidFontIdentifier);
+        };
+        Ok(Self {
+            source: SourceId::from(source),
+            id: id.to_string(),
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("invalid font identifier")]
+pub struct InvalidFontIdentifier;
 
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,

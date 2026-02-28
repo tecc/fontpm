@@ -1,8 +1,8 @@
 use crate::cli::CliContext;
 use crate::config::Config;
 use crate::platform::{FontInstallState, FontToInstall, InstallStrategy};
-use crate::source::SourceContext;
-use crate::util::font::FontReference;
+use crate::source::{SourceContext, SourceId};
+use crate::util::font::{FontIdentifier, FontReference};
 use anyhow::Context;
 use relative_path::RelativePathBuf;
 use std::collections::BTreeMap;
@@ -122,7 +122,7 @@ impl super::PlatformImpl for Platform {
         };
 
         Ok(FontInstallState {
-            fontpm: guard.fonts.contains_key(font),
+            fontpm: guard.fonts.contains_key(&font.identifier),
             // TODO: Use fontconfig to check if it is installed externally
             external: false,
         })
@@ -139,10 +139,8 @@ impl super::PlatformImpl for Platform {
             //       It might break if you're trying to write things on FAT
             //       filesystems (or NTFS, for that matter, but surely not
             //       right?).
-            let font_base_path = RelativePathBuf::from(format!(
-                "{}:{}",
-                font.reference.source, font.reference.id
-            ));
+            let font_base_path =
+                RelativePathBuf::from(font.reference.identifier.to_string());
             let target_path = font_base_path.to_path(&self.local_dir);
             let _ = writeln!(
                 ctx.cli.debug(),
@@ -199,7 +197,7 @@ impl super::PlatformImpl for Platform {
             };
 
             guard.fonts.insert(
-                font.reference.clone(),
+                font.reference.identifier.clone(),
                 LockedFont {
                     reference: font.reference,
                     base_path: font_base_path,
@@ -299,7 +297,7 @@ impl StorageLocation {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct LockfileData {
-    fonts: BTreeMap<FontReference, LockedFont>,
+    fonts: BTreeMap<FontIdentifier, LockedFont>,
 }
 impl LockfileData {
     pub fn new() -> Self {
