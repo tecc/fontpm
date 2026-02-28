@@ -10,17 +10,17 @@ use indicatif::{MultiProgress, ProgressDrawTarget};
 use std::process::ExitCode;
 use std::{fmt, io};
 
-/// FontPM, the font package manager.
+/// # FontPM, the font package manager.
 ///
-/// FontPM is a tool to manage fonts. Lorem ipsum dolores sit amet, put
-/// something else here later.
+/// FontPM is a tool to manage fonts installed on your system without having to
+/// visit *<insert your favourite font website here>* to download them.
 ///
-/// # Installation
+/// ## Font installation
 /// FontPM offers system-wide installation and user-local installation.
 ///
 /// TODO: Project-local font management
 #[derive(Debug, Parser)]
-#[clap(name = "fontpm")]
+#[clap(name = "fontpm", version)]
 #[command(max_term_width = 80)]
 pub struct CliArgs {
     #[command(flatten)]
@@ -119,6 +119,13 @@ impl CliContext {
         }
     }
 
+    pub fn note(&'_ self) -> PrefixedOutput<'_> {
+        PrefixedOutput {
+            prefix: style("note:").bold().blue(),
+            ctx: &self,
+            noop: false,
+        }
+    }
     pub fn ok(&'_ self) -> PrefixedOutput<'_> {
         PrefixedOutput {
             prefix: style("ok!").bold().green(),

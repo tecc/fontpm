@@ -18,7 +18,7 @@ async-trait = "0.1.89"
 base64 = "0.22.1"
 bytes = "1.11.0"
 chrono = { version = "0.4.42", features = ["serde"] }
-clap = { version = "4.5", features = ["derive", "wrap_help"] }
+clap = { version = "4.5", features = ["derive", "wrap_help", "unstable-markdown"] }
 console = "0.16.1"
 dashmap = "6.1.0"
 dialoguer = "0.12.0"
