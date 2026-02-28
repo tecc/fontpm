@@ -91,6 +91,13 @@ impl Platform {
             .install_fonts_local(context, fonts_to_install)
             .await
     }
+
+    pub async fn list_installed_fonts_local(
+        &self,
+        cli: &CliContext,
+    ) -> anyhow::Result<Vec<FontReference>> {
+        self.inner.list_installed_fonts_local(cli).await
+    }
 }
 
 /// Platform-specific functionality required by FontPM.
@@ -121,6 +128,11 @@ trait PlatformImpl: Sized {
         context: &SourceContext,
         fonts: Vec<FontToInstall>,
     ) -> anyhow::Result<()>;
+
+    async fn list_installed_fonts_local(
+        &self,
+        cli: &CliContext,
+    ) -> anyhow::Result<Vec<FontReference>>;
 }
 
 /// Represents how a font is installed on the current system.

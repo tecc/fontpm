@@ -45,6 +45,7 @@ pub struct GlobalOptions {
 pub enum CliCommand {
     Config(config::ConfigArgs),
     Install(install::InstallArgs),
+    List(list::ListArgs),
     Refresh(refresh::RefreshArgs),
     Source(source::SourceArgs),
 }
@@ -55,6 +56,7 @@ pub fn run() -> ExitCode {
     match args.command {
         CliCommand::Config(args) => config::run(args),
         CliCommand::Install(args) => install::run(args),
+        CliCommand::List(args) => list::run(args),
         CliCommand::Refresh(args) => refresh::run(args),
         CliCommand::Source(args) => source::run(args),
     }

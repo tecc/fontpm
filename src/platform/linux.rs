@@ -210,6 +210,21 @@ impl super::PlatformImpl for Platform {
 
         Ok(())
     }
+
+    async fn list_installed_fonts_local(
+        &self,
+        cli: &CliContext,
+    ) -> anyhow::Result<Vec<FontReference>> {
+        let local_storage = self.get_local_storage(cli).await?;
+        let Ok(lockfile) = local_storage.lockfile.read() else {
+            anyhow::bail!("could not acquire read lock to lockfile data because it is poisoned")
+        };
+        Ok(lockfile
+            .fonts
+            .values()
+            .map(|font| font.reference.clone())
+            .collect())
+    }
 }
 
 struct StorageLocation {
