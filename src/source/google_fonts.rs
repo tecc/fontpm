@@ -3,7 +3,7 @@
 use crate::cli::CliContext;
 use crate::config::{config, util, Config, ConfigValue};
 use crate::source::{
-    Refreshed, Source, SourceContext, SourceId, SourceSubcommand,
+    HasSubcommand, Refreshed, Source, SourceContext, SourceId, SourceSubcommand,
 };
 use crate::util::font::{
     Download, FontFile, FontFileKind, FontIdentifier, FontReference, FontSpec,
@@ -13,13 +13,14 @@ use crate::util::store::ObjectId;
 use crate::util::{impl_serde_as_string, string_enum};
 use anyhow::Context;
 use chrono::{DateTime, Utc};
+use clap::{Args, Command, Parser, Subcommand};
 use indicatif::ProgressBar;
 use relative_path::{RelativePath, RelativePathBuf};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -123,6 +124,35 @@ impl GoogleFontsConfig {
             fresh_index_url,
             data_file,
         })
+    }
+}
+
+#[derive(Args)]
+pub struct GoogleFontsArgs {
+    #[command(subcommand)]
+    command: SourceCommand,
+}
+#[derive(Subcommand)]
+enum SourceCommand {
+    Index(IndexArgs),
+}
+
+/// Index the Google Fonts git repository.
+#[derive(Args)]
+struct IndexArgs {
+    repository: PathBuf,
+}
+
+impl HasSubcommand for GoogleFonts {
+    type Args = GoogleFontsArgs;
+
+    fn execute(
+        &mut self,
+        cli: CliContext,
+        config: Config,
+        args: Self::Args,
+    ) -> ExitCode {
+        ExitCode::SUCCESS
     }
 }
 
@@ -303,10 +333,6 @@ impl Source for GoogleFonts {
         } else {
             Ok(vec![])
         }
-    }
-
-    fn execute_command(&mut self, command: SourceSubcommand) -> ExitCode {
-        todo!("google fonts todo")
     }
 }
 

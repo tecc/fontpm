@@ -736,7 +736,7 @@ mod tests {
     /// Ensure that the default configuration is a valid configuration.
     #[test]
     fn default_config_loads() {
-        let context = CliContext::mock();
+        let context = CliContext::mock_stdout();
         let table = FileTable::load_str(
             &context,
             &PathBuf::new().into(),

@@ -74,7 +74,7 @@ pub struct CliContext {
     mpb: Option<MultiProgress>,
 }
 impl CliContext {
-    pub fn mock() -> Self {
+    pub fn mock_stdout() -> Self {
         Self {
             term: console::Term::stdout(),
             modify_files: false,

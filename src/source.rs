@@ -30,8 +30,54 @@ use std::sync::Arc;
 #[cfg(feature = "source-google-fonts")]
 pub mod google_fonts;
 
+pub trait HasSubcommand {
+    type Args: clap::Args;
+
+    fn augment(&self, command: clap::Command) -> clap::Command {
+        use clap::Args;
+        Self::Args::augment_args(command)
+    }
+    fn execute(
+        &mut self,
+        cli: CliContext,
+        config: Config,
+        args: Self::Args,
+    ) -> ExitCode;
+}
+
+pub trait DynHasSubcommand {
+    fn augment(&self, command: clap::Command) -> clap::Command;
+    fn execute(
+        &mut self,
+        cli: CliContext,
+        config: Config,
+        matches: &mut clap::ArgMatches,
+    ) -> ExitCode;
+}
+impl<T> DynHasSubcommand for T
+where
+    T: HasSubcommand,
+{
+    fn augment(&self, command: clap::Command) -> clap::Command {
+        HasSubcommand::augment(self, command)
+    }
+    fn execute(
+        &mut self,
+        cli: CliContext,
+        config: Config,
+        matches: &mut clap::ArgMatches,
+    ) -> ExitCode {
+        use clap::FromArgMatches;
+        let args = match T::Args::from_arg_matches_mut(matches) {
+            Ok(x) => x,
+            Err(e) => e.exit(),
+        };
+        HasSubcommand::execute(self, cli, config, args)
+    }
+}
+
 #[async_trait]
-pub trait Source: Send {
+pub trait Source: Send + DynHasSubcommand {
     /// Get the ID for this source.
     fn id(&self) -> &SourceId;
 
@@ -67,8 +113,6 @@ pub trait Source: Send {
         context: &Arc<SourceContext>,
         font: &FontSpec,
     ) -> anyhow::Result<Vec<ResolvedFont>>;
-
-    fn execute_command(&mut self, command: SourceSubcommand) -> ExitCode;
 }
 
 pub struct SourceSubcommand {
@@ -180,7 +224,11 @@ impl Sources {
         }
     }
 
-    pub fn is_enabled(&self, id: &SourceId) -> bool {
+    pub fn is_enabled<T>(&self, id: &T) -> bool
+    where
+        T: ?Sized,
+        SourceId: PartialEq<T>,
+    {
         self.iter().any(|source| source.id() == id)
     }
 
@@ -314,6 +362,16 @@ macro_rules! source_id (
         impl PartialEq for $typename {
             fn eq(&self, other: &Self) -> bool {
                 self.canonical_name().eq(other.canonical_name())
+            }
+        }
+        impl PartialEq<str> for $typename {
+            fn eq(&self, other: &str) -> bool {
+                self.canonical_name().eq(other)
+            }
+        }
+        impl PartialEq<$typename> for str {
+            fn eq(&self, other: &$typename) -> bool {
+                self.eq(other.canonical_name())
             }
         }
         impl serde::Serialize for $typename {

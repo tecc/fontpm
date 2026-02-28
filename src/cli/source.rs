@@ -1,10 +1,13 @@
 use crate::cli::{tri, tri_f, CliContext, GlobalOptions};
 use crate::config::Config;
-use crate::source::{SourceId, SourceSubcommand, Sources};
+use crate::source::{SourceContext, SourceId, SourceSubcommand, Sources};
 use clap::builder::PossibleValue;
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{
+    ArgMatches, Args, Command, Error, FromArgMatches, Subcommand, ValueEnum,
+};
 use std::ffi::OsString;
 use std::process::ExitCode;
+use std::sync::{Arc, LazyLock, OnceLock};
 
 /// Source-specific commands
 #[derive(Debug, Args)]
@@ -23,13 +26,55 @@ struct Opts {
     #[arg(required_unless_present("list"))]
     source: Option<SourceId>,
     #[command(subcommand)]
-    args: Option<SubcommandArgs>,
+    args: CliSubcommand,
 }
-// It looks like this because otherwise the help message doesn't look correct
-#[derive(Debug, Subcommand)]
-enum SubcommandArgs {
-    #[command(external_subcommand)]
-    External(Vec<OsString>),
+
+#[derive(Debug)]
+struct CliSubcommand(ArgMatches);
+
+// Cheat to allow reuse of config
+static CLI_CONTEXT: LazyLock<Arc<CliContext>> =
+    LazyLock::new(|| Arc::new(CliContext::mock_stdout()));
+static CONFIG: LazyLock<Arc<Config>> =
+    LazyLock::new(|| Arc::new(Config::load(&CLI_CONTEXT).unwrap()));
+static SOURCES: LazyLock<Sources> =
+    LazyLock::new(|| Sources::create_enabled(&CLI_CONTEXT, &CONFIG).unwrap());
+
+impl FromArgMatches for CliSubcommand {
+    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, Error> {
+        Ok(Self(matches.clone()))
+    }
+    fn update_from_arg_matches(
+        &mut self,
+        matches: &ArgMatches,
+    ) -> Result<(), Error> {
+        self.0 = matches.clone();
+        Ok(())
+    }
+}
+
+impl Subcommand for CliSubcommand {
+    fn augment_subcommands(cmd: Command) -> Command {
+        cmd.defer(|command| {
+            command.subcommands(SOURCES.iter().map(|source| {
+                let command = Command::new(source.id().canonical_name());
+                source.augment(command)
+            }))
+        })
+    }
+
+    fn augment_subcommands_for_update(cmd: Command) -> Command {
+        cmd.defer(|mut command| {
+            for source in SOURCES.iter() {
+                command = source.augment(command);
+            }
+            command
+        })
+    }
+
+    fn has_subcommand(name: &str) -> bool {
+        SOURCES.is_enabled(name)
+    }
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -49,12 +94,9 @@ pub fn run(args: SourceArgs) -> ExitCode {
         }
         Opts {
             source: Some(source_id),
-            args,
+            mut args,
             ..
         } => {
-            let args = args.unwrap_or(SubcommandArgs::External(vec![]));
-            let SubcommandArgs::External(args) = args;
-
             let Some(source) =
                 Sources::create_specific(&cli, &config, &source_id)
             else {
@@ -71,8 +113,7 @@ pub fn run(args: SourceArgs) -> ExitCode {
                 "Could not create source {}",
                 source_id
             );
-
-            source.execute_command(SourceSubcommand { cli, config, args })
+            source.execute(cli, config, &mut args.0)
         }
         Opts { .. } => {
             unreachable!()
