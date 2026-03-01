@@ -208,9 +208,10 @@ pub struct FontpmConfig {
     /// 2. `fontpm.toml` key: `fontpm.install_strategy`
     /// 3. Default: Platform-specific value.
     pub install_strategy: ConfigValue<Arc<[InstallStrategy]>>,
-    pub platform: FontpmPlatformConfig, // TODO: Scope-specific strategies
-                                        // pub global_strategy: ConfigValue<Arc<[InstallStrategy]>>,
-                                        // pub local_strategy: ConfigValue<Arc<[InstallStrategy]>>
+    pub platform: FontpmPlatformConfig,
+    // TODO: Scope-specific strategies
+    // pub global_strategy: ConfigValue<Arc<[InstallStrategy]>>,
+    // pub local_strategy: ConfigValue<Arc<[InstallStrategy]>>
 }
 
 #[derive(Debug)]
@@ -219,7 +220,7 @@ pub struct FontpmHttpConfig {
     ///
     /// Sources:
     /// 1. Environment variable: `FONTPM_HTTP_USER_AGENT`
-    /// 2. `fontpm.toml` key: `fontpm.user_agent`
+    /// 2. `fontpm.toml` key: `fontpm.http.user_agent`
     /// 3. Default: `fontpm/{CARGO_PKG_VERSION}`.
     pub user_agent: ConfigValue<HeaderValue>,
 }
